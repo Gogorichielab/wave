@@ -6,10 +6,11 @@ on:
       - main
     paths-ignore:
       - '**/*.md'
+  # No base-branch filter: stacked pull requests target the branch of the
+  # layer below them, and every layer needs tests. Deploy jobs below are
+  # still limited to pull requests that target main.
   pull_request:
     types: [opened, synchronize, reopened, closed]
-    branches:
-      - main
     paths-ignore:
       - '**/*.md'
 
@@ -55,6 +56,9 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Build
+        run: npm run build
 
   release:
     name: Create Release
@@ -102,7 +106,7 @@ jobs:
           fi
 
   build_and_deploy_job:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed' && github.base_ref == 'main')
     runs-on: ubuntu-latest
     name: Build and Deploy Job
     needs: test
@@ -141,7 +145,7 @@ jobs:
           ###### End of Repository/Build Configurations ######
 
   close_pull_request_job:
-    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.base_ref == 'main'
     runs-on: ubuntu-latest
     name: Close Pull Request Job
     steps:
