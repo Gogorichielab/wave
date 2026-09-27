@@ -337,7 +337,9 @@
             transform: scale(1.1);
         }
 
-        #pause-overlay {
+        #pause-overlay,
+
+        #result-overlay {
             position: absolute;
             top: 50%;
             left: 50%;
@@ -349,12 +351,16 @@
             z-index: 50;
         }
 
-        #pause-overlay h2 {
+        #pause-overlay h2,
+
+        #result-overlay h2 {
             margin-bottom: 20px;
             font-size: 2em;
         }
 
-        #pause-overlay button {
+        #pause-overlay button,
+
+        #result-overlay button {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             border: none;
             color: white;
@@ -366,9 +372,16 @@
             transition: all 0.3s;
         }
 
-        #pause-overlay button:hover {
+        #pause-overlay button:hover,
+
+        #result-overlay button:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        #result-summary {
+            margin-bottom: 10px;
+            line-height: 1.6;
         }
 
         .settings-panel {
@@ -530,12 +543,16 @@
                 font-size: 0.95em;
             }
 
-            #pause-overlay {
+            #pause-overlay,
+
+            #result-overlay {
                 max-width: 95%;
                 padding: 25px 20px;
             }
 
-            #pause-overlay h2 {
+            #pause-overlay h2,
+
+            #result-overlay h2 {
                 font-size: 1.5em;
             }
 
@@ -633,7 +650,8 @@
         @media (hover: none) and (pointer: coarse) {
             #controls button,
             #tutorial button,
-            #pause-overlay button {
+            #pause-overlay button,
+            #result-overlay button {
                 min-height: 44px;
                 min-width: 44px;
             }
@@ -725,6 +743,13 @@
                     </select>
                 </label>
                 <label>
+                    Mode:
+                    <select id="mode-select">
+                        <option value="practice" selected>Practice (no time limit)</option>
+                        <option value="challenge">Challenge: 3 waves in 90s</option>
+                    </select>
+                </label>
+                <label>
                     Field Type:
                     <select id="field-type-select">
                         <option value="soccer" selected>Soccer</option>
@@ -798,10 +823,18 @@
             <button id="restart-btn">Restart</button>
         </div>
 
+        <div id="result-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="result-title">
+            <h2 id="result-title">Challenge Complete!</h2>
+            <p id="result-summary"></p>
+            <button id="retry-btn">Retry</button>
+            <button id="result-setup-btn">Back to Setup</button>
+        </div>
+
         <div id="stats-panel" class="hidden">
             <div class="stat-item">⏱️ Time: <span id="game-time">0:00</span></div>
             <div class="stat-item">🎯 Accuracy: <span id="accuracy">100%</span></div>
             <div class="stat-item">🔥 Streak: <span id="streak">0</span></div>
+            <div class="stat-item hidden" id="challenge-item">🏁 Challenge: <span id="challenge-progress">0/3</span> waves, <span id="challenge-time">1:30</span> left</div>
         </div>
 
         <div id="controls" class="hidden">
