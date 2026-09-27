@@ -119,6 +119,10 @@ jobs:
       
       - name: Build And Deploy
         id: builddeploy
+        # A pull request preview is best effort: Azure caps staging
+        # environments, and every layer of a stacked PR can reach this step
+        # when the stack rebases. Production deploys from main must succeed.
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_VICTORIOUS_CLIFF_0AB69FE0F }}
