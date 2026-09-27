@@ -1,34 +1,35 @@
 /**
- * Mock Python game engine for demo/testing when Pyodide is unavailable
- * Provides the same API as the Python engine but runs in pure JavaScript
+ * Stadium Wave game engine
+ * Owns the crowd simulation, wave propagation, scoring and persistence.
+ * The renderer in main.js talks to it only through `gameAPI`.
  */
 
-const VENUE_MODIFIERS = {
+export const VENUE_MODIFIERS = {
     soccer:   { energy_rate: 1.00, fatigue_rate: 1.00, readiness_threshold: 0.30 },
     baseball: { energy_rate: 0.95, fatigue_rate: 1.05, readiness_threshold: 0.32 },
     football: { energy_rate: 1.00, fatigue_rate: 1.00, readiness_threshold: 0.30 },
     cricket:  { energy_rate: 0.90, fatigue_rate: 1.10, readiness_threshold: 0.35 },
 };
 
-const WEATHER_MODIFIERS = {
+export const WEATHER_MODIFIERS = {
     sunny:  { energy_rate: 1.00, fatigue_rate: 1.00 },
     cloudy: { energy_rate: 0.95, fatigue_rate: 1.00 },
     rainy:  { energy_rate: 0.70, fatigue_rate: 1.20 },
     snowy:  { energy_rate: 0.50, fatigue_rate: 1.30 },
 };
 
-class MockSectorState {
+export class SectorState {
     static IDLE = "idle";
     static ANTICIPATING = "anticipating";
     static STANDING = "standing";
     static SEATED = "seated";
 }
 
-class MockCrowdSector {
+export class CrowdSector {
     constructor(sectorId, size = 100) {
         this.sector_id = sectorId;
         this.size = size;
-        this.state = MockSectorState.IDLE;
+        this.state = SectorState.IDLE;
         this.energy = 0.5;
         this.fatigue = 0.0;
         this.enthusiasm = Math.random() * 0.3 + 0.6;
@@ -53,15 +54,15 @@ class MockCrowdSector {
             this.energy = Math.min(1.0, this.energy + dt * 0.1 * this._energy_rate_mult);
         }
 
-        if (this.state === MockSectorState.STANDING) {
+        if (this.state === SectorState.STANDING) {
             this.timer += dt;
             if (this.timer > 1.5) {
                 this.sit_down();
             }
-        } else if (this.state === MockSectorState.ANTICIPATING) {
+        } else if (this.state === SectorState.ANTICIPATING) {
             this.timer += dt;
             if (this.timer > 0.5) {
-                this.state = MockSectorState.IDLE;
+                this.state = SectorState.IDLE;
                 this.timer = 0;
             }
         }
@@ -70,12 +71,12 @@ class MockCrowdSector {
     can_wave() {
         const readiness = (this.energy * this.enthusiasm) - (this.fatigue + this.distractions);
         return readiness > this._readiness_threshold &&
-               (this.state === MockSectorState.IDLE || this.state === MockSectorState.SEATED);
+               (this.state === SectorState.IDLE || this.state === SectorState.SEATED);
     }
 
     start_wave() {
         if (this.can_wave()) {
-            this.state = MockSectorState.ANTICIPATING;
+            this.state = SectorState.ANTICIPATING;
             this.timer = 0;
             return true;
         }
@@ -83,8 +84,8 @@ class MockCrowdSector {
     }
 
     stand_up() {
-        if (this.state === MockSectorState.ANTICIPATING) {
-            this.state = MockSectorState.STANDING;
+        if (this.state === SectorState.ANTICIPATING) {
+            this.state = SectorState.STANDING;
             this.timer = 0;
             this.energy = Math.max(0, this.energy - 0.2);
             this.fatigue = Math.min(1.0, this.fatigue + 0.1);
@@ -94,7 +95,7 @@ class MockCrowdSector {
     }
 
     sit_down() {
-        this.state = MockSectorState.SEATED;
+        this.state = SectorState.SEATED;
         this.timer = 0;
     }
 
@@ -115,12 +116,12 @@ class MockCrowdSector {
     }
 }
 
-class MockWaveGame {
+export class WaveGame {
     constructor(num_sectors = 16, venue = 'soccer', weather = 'sunny') {
         this.num_sectors = num_sectors;
         this.sectors = [];
         for (let i = 0; i < num_sectors; i++) {
-            this.sectors.push(new MockCrowdSector(i, Math.floor(Math.random() * 40) + 80));
+            this.sectors.push(new CrowdSector(i, Math.floor(Math.random() * 40) + 80));
         }
         this.score = 0;
         this.combo = 0;
@@ -303,7 +304,7 @@ class MockWaveGame {
 
         // Check if anticipating sector should stand
         const current = this.sectors[currentSector];
-        if (current.state === MockSectorState.ANTICIPATING) {
+        if (current.state === SectorState.ANTICIPATING) {
             if (waveTimer > 0.2) {
                 if (current.stand_up()) {
                     this.combo += 1;
@@ -491,12 +492,12 @@ class MockWaveGame {
     }
 }
 
-// Export mock game API
-export const mockGameAPI = {
+// Engine API used by the renderer
+export const gameAPI = {
     game: null,
 
     init_game(num_sectors = 16, venue = 'soccer', weather = 'sunny') {
-        this.game = new MockWaveGame(num_sectors, venue, weather);
+        this.game = new WaveGame(num_sectors, venue, weather);
         return JSON.stringify({ status: 'initialized', sectors: num_sectors });
     },
     

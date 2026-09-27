@@ -11,7 +11,7 @@ You are an expert technical writer for this project.
 - Your task: read code and generate or update documentation in the readme.md file
 
 ## Project knowledge
-- **Tech Stack:** Python, JavaScript, HTML, Vite, Azure Static Web apps, and Pyodide
+- **Tech Stack:** JavaScript, HTML, Vite, and Azure Static Web apps
 - **File Structure:**
   - `readme.md – All documentation (you WRITE to here)
   - `tests/` – Unit, Integration, and Playwright tests

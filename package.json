@@ -2,20 +2,20 @@
   "name": "stadium-wave-game",
   "version": "1.0.0",
   "private": true,
-  "description": "Browser-based stadium wave game with Python logic",
+  "description": "Browser-based stadium wave game",
   "main": "index.html",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "pytest tests/",
-    "test:e2e": "playwright test"
+    "test": "node --test 'tests/unit/**/*.test.js'",
+    "test:e2e": "playwright test",
+    "test:e2e:prod": "npm run build && PW_PRODUCTION=1 playwright test"
   },
   "keywords": [
     "game",
     "wave",
     "stadium",
-    "pyodide",
     "canvas"
   ],
   "private": true,

@@ -1,14 +1,11 @@
 /**
  * Stadium Wave Game - Main JavaScript Entry
- * Handles Pyodide initialization, rendering, and game loop
+ * Handles rendering, input, and the game loop
  */
 
-import { mockGameAPI } from './mock_engine.js';
+import { gameAPI } from './engine.js';
 
 // Global state
-let pyodide = null;
-let pyFns = null; // cached Python function handles (avoids per-call runPython compiles)
-let useMockEngine = false;
 let canvas = null;
 let ctx = null;
 let gameState = null;
@@ -543,59 +540,11 @@ function shouldRenderDetailedAnimations() {
 }
 
 /**
- * Initialize Pyodide and load Python game engine
- */
-async function initPyodide() {
-    // Check if Pyodide is available
-    if (typeof loadPyodide === 'undefined') {
-        console.warn('Pyodide not available, using mock JavaScript engine');
-        useMockEngine = true;
-        return true;
-    }
-    
-    try {
-        console.log('Loading Pyodide and Python game engine...');
-        // Fetch the engine source in parallel with the Pyodide runtime download
-        const [pyodideInstance, pythonCode] = await Promise.all([
-            loadPyodide(),
-            fetch('/game_engine.py').then(response => response.text())
-        ]);
-        pyodide = pyodideInstance;
-        await pyodide.runPythonAsync(pythonCode);
-
-        // Cache function handles once; calling them directly avoids
-        // re-compiling a Python source string on every call
-        pyFns = {
-            init_game: pyodide.globals.get('init_game'),
-            update_game_with_events: pyodide.globals.get('update_game_with_events'),
-            start_wave_at: pyodide.globals.get('start_wave_at'),
-            boost_sector_energy: pyodide.globals.get('boost_sector_energy'),
-            trigger_event: pyodide.globals.get('trigger_event'),
-            set_venue: pyodide.globals.get('set_venue'),
-            set_weather: pyodide.globals.get('set_weather')
-        };
-
-        console.log('Python game engine loaded successfully');
-        return true;
-    } catch (error) {
-        console.error('Failed to initialize Pyodide:', error);
-        console.log('Falling back to mock JavaScript engine');
-        useMockEngine = true;
-        return true;
-    }
-}
-
-/**
- * Initialize game with Python
+ * Initialize a new engine run
  */
 function initGame() {
     try {
-        let result;
-        if (useMockEngine) {
-            result = mockGameAPI.init_game(16, fieldType, weatherType);
-        } else {
-            result = pyFns.init_game(16, fieldType, weatherType);
-        }
+        const result = gameAPI.init_game(16, fieldType, weatherType);
         console.log('Game initialized:', result);
         return true;
     } catch (error) {
@@ -605,19 +554,13 @@ function initGame() {
 }
 
 /**
- * Update game state from Python (with error handling)
+ * Advance the engine and apply its state and events (with error handling)
  */
 function updateGameState(dt) {
     try {
-        // Single engine call per tick returning both state and events.
-        // The mock engine hands back plain objects (no JSON round trip);
-        // the Python engine crosses the bridge once as a JSON string.
-        let payload;
-        if (useMockEngine) {
-            payload = mockGameAPI.update_game_with_events(dt);
-        } else {
-            payload = JSON.parse(pyFns.update_game_with_events(dt));
-        }
+        // Single engine call per tick returning both state and events as
+        // plain objects (no JSON round trip)
+        const payload = gameAPI.update_game_with_events(dt);
 
         gameState = payload.state;
         payload.events.forEach(event => handleGameEvent(event));
@@ -639,7 +582,7 @@ function updateGameState(dt) {
 }
 
 /**
- * Handle game events from Python
+ * Handle game events from the engine
  */
 function handleGameEvent(event) {
     switch (event.type) {
@@ -897,13 +840,7 @@ function updateStats(dt) {
  */
 function startWave(sectorId) {
     try {
-        let resultJson;
-        if (useMockEngine) {
-            resultJson = mockGameAPI.start_wave_at(sectorId);
-        } else {
-            resultJson = pyFns.start_wave_at(sectorId);
-        }
-        const result = JSON.parse(resultJson);
+        const result = JSON.parse(gameAPI.start_wave_at(sectorId));
         return result.success;
     } catch (error) {
         console.error('Failed to start wave:', error);
@@ -916,11 +853,7 @@ function startWave(sectorId) {
  */
 function boostSector(sectorId) {
     try {
-        if (useMockEngine) {
-            mockGameAPI.boost_sector_energy(sectorId);
-        } else {
-            pyFns.boost_sector_energy(sectorId);
-        }
+        gameAPI.boost_sector_energy(sectorId);
     } catch (error) {
         console.error('Failed to boost sector:', error);
     }
@@ -931,11 +864,7 @@ function boostSector(sectorId) {
  */
 function triggerStadiumEvent(eventType, sectorId = null) {
     try {
-        if (useMockEngine) {
-            mockGameAPI.trigger_event(eventType, sectorId);
-        } else {
-            pyFns.trigger_event(eventType, sectorId ?? null);
-        }
+        gameAPI.trigger_event(eventType, sectorId ?? null);
     } catch (error) {
         console.error('Failed to trigger event:', error);
     }
@@ -2572,11 +2501,7 @@ function setupInputHandlers() {
             resetFieldGradients();
             // Notify engine of venue change
             if (gameState) {
-                if (useMockEngine) {
-                    mockGameAPI.set_venue(fieldType);
-                } else {
-                    pyFns.set_venue(fieldType);
-                }
+                gameAPI.set_venue(fieldType);
                 render();
             }
         });
@@ -2598,11 +2523,7 @@ function setupInputHandlers() {
             weatherType = e.target.value;
             weatherParticles = [];
             if (gameState) {
-                if (useMockEngine) {
-                    mockGameAPI.set_weather(weatherType);
-                } else {
-                    pyFns.set_weather(weatherType);
-                }
+                gameAPI.set_weather(weatherType);
             }
         });
     }
@@ -2742,6 +2663,22 @@ function returnToSetup() {
 }
 
 /**
+ * Publish read-only diagnostics so the active engine can be verified in a
+ * deployed build. Loading the page with `?e2e` additionally exposes the
+ * engine API so smoke tests can drive deterministic scenarios.
+ */
+function exposeDiagnostics() {
+    const diagnostics = {
+        engine: 'javascript',
+        getState: () => gameState
+    };
+    if (new URLSearchParams(window.location.search).has('e2e')) {
+        diagnostics.api = gameAPI;
+    }
+    window.waveDiagnostics = diagnostics;
+}
+
+/**
  * Main initialization
  */
 async function main() {
@@ -2756,31 +2693,19 @@ async function main() {
     // Setup canvas
     setupCanvas();
     
-    // Initialize Pyodide or fallback to mock
-    const success = await initPyodide();
-    
-    if (success) {
-        // Hide loading screen
-        document.getElementById('loading').classList.add('hidden');
-        
-        // Show engine info
-        if (useMockEngine) {
-            console.log('Running with JavaScript mock engine');
-        } else {
-            console.log('Running with Python/Pyodide engine');
-        }
-        
-        // Setup input handlers
-        setupInputHandlers();
-        
-        // Setup start button
-        addTrackedEventListener(document.getElementById('start-btn'), 'click', startGame);
-        
-        console.log('Game ready!');
-    } else {
-        document.getElementById('loading').innerHTML = 
-            '<h2>Failed to Load</h2><p>Could not initialize game engine</p>';
-    }
+    // Hide loading screen
+    document.getElementById('loading').classList.add('hidden');
+    console.log('Running with JavaScript engine');
+
+    // Setup input handlers
+    setupInputHandlers();
+
+    // Setup start button
+    addTrackedEventListener(document.getElementById('start-btn'), 'click', startGame);
+
+    exposeDiagnostics();
+
+    console.log('Game ready!');
 }
 
 // Start when DOM is ready
