@@ -61,6 +61,20 @@ export const CHALLENGE = {
 const AMBIENT_SCOREBOARD_INTERVAL = 45;
 const SCOREBOARD_BOOST = 0.2;
 
+// Version of the complete engine save format produced by serialize()
+export const SAVE_VERSION = 2;
+
+const WAVE_PATTERNS = ['normal', 'reverse', 'double', 'accelerating'];
+const GAME_MODES = ['practice', 'challenge'];
+const CHALLENGE_STATUSES = ['running', 'won', 'lost'];
+
+export class SaveError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'SaveError';
+    }
+}
+
 // Distraction or fatigue at or above this is reported as the reason a sector is not ready
 const NOTABLE_DRAG = 0.15;
 
@@ -707,19 +721,161 @@ export class WaveGame {
         };
     }
 
-    save_state() {
-        const state = this.get_state();
-        state.unlocks = this.unlocks;
-        return JSON.stringify(state);
+    /**
+     * Complete snapshot of the simulation, enough to resume mid-wave.
+     * Unlike get_state() (a render snapshot), this includes every timer.
+     */
+    serialize() {
+        return {
+            version: SAVE_VERSION,
+            num_sectors: this.num_sectors,
+            venue: this.venue,
+            weather: this.weather,
+            difficulty: this.difficulty,
+            mode: this.mode,
+            sectors: this.sectors.map(sector => ({
+                size: sector.size,
+                state: sector.state,
+                energy: sector.energy,
+                fatigue: sector.fatigue,
+                enthusiasm: sector.enthusiasm,
+                distractions: sector.distractions,
+                timer: sector.timer,
+            })),
+            score: this.score,
+            combo: this.combo,
+            max_combo: this.max_combo,
+            time_elapsed: this.time_elapsed,
+            successful_waves: this.successful_waves,
+            failed_waves: this.failed_waves,
+            stadium_level: this.stadium_level,
+            unlocks: [...this.unlocks],
+            wave_active: this.wave_active,
+            wave_start_sector: this.wave_start_sector,
+            current_wave_sector: this.current_wave_sector,
+            wave_timer: this.wave_timer,
+            wave_speed: this.wave_speed,
+            wave_pattern: this.wave_pattern,
+            wave_direction: this.wave_direction,
+            speed_increment: this.speed_increment,
+            sectors_traveled: this.sectors_traveled,
+            second_wave_active: this.second_wave_active,
+            second_wave_start_sector: this.second_wave_start_sector,
+            second_current_wave_sector: this.second_current_wave_sector,
+            second_wave_timer: this.second_wave_timer,
+            boost_charges: this.boost_charges,
+            boost_recharge_timer: this.boost_recharge_timer,
+            hype_cooldown_remaining: this.hype_cooldown_remaining,
+            mascot_timer: this.mascot_timer,
+            scoreboard_timer: this.scoreboard_timer,
+            game_over: this.game_over,
+            challenge: this.challenge ? { ...this.challenge } : null,
+        };
     }
 
+    /**
+     * Check a serialize() snapshot without loading it.
+     * @throws {SaveError} describing the first problem found
+     */
+    static validate_save(data) {
+        const fail = message => { throw new SaveError(message); };
+        const isNumber = value => typeof value === 'number' && Number.isFinite(value);
+        const isSectorIndex = (value, n) => Number.isInteger(value) && value >= -1 && value < n;
+
+        if (!data || typeof data !== 'object') fail('Save data is not an object');
+        if (data.version !== SAVE_VERSION) fail(`Unsupported save version: ${data.version}`);
+
+        const n = data.num_sectors;
+        if (!Number.isInteger(n) || n < 2 || n > 64) fail('Invalid sector count');
+        if (!Array.isArray(data.sectors) || data.sectors.length !== n) fail('Sector list does not match sector count');
+        if (!VENUE_MODIFIERS[data.venue]) fail(`Unknown venue: ${data.venue}`);
+        if (!WEATHER_MODIFIERS[data.weather]) fail(`Unknown weather: ${data.weather}`);
+        if (!DIFFICULTY_PRESETS[data.difficulty]) fail(`Unknown difficulty: ${data.difficulty}`);
+        if (!GAME_MODES.includes(data.mode)) fail(`Unknown mode: ${data.mode}`);
+        if (!WAVE_PATTERNS.includes(data.wave_pattern)) fail(`Unknown wave pattern: ${data.wave_pattern}`);
+        if (data.wave_direction !== 1 && data.wave_direction !== -1) fail('Invalid wave direction');
+
+        const sectorStates = Object.values(SectorState);
+        data.sectors.forEach((sector, i) => {
+            if (!sector || typeof sector !== 'object') fail(`Sector ${i} is not an object`);
+            if (!sectorStates.includes(sector.state)) fail(`Sector ${i} has unknown state`);
+            for (const key of ['size', 'energy', 'fatigue', 'enthusiasm', 'distractions', 'timer']) {
+                if (!isNumber(sector[key])) fail(`Sector ${i} has invalid ${key}`);
+            }
+        });
+
+        for (const key of ['score', 'combo', 'max_combo', 'time_elapsed', 'successful_waves', 'failed_waves',
+            'stadium_level', 'wave_timer', 'wave_speed', 'speed_increment', 'sectors_traveled',
+            'second_wave_timer', 'boost_charges', 'boost_recharge_timer', 'hype_cooldown_remaining',
+            'mascot_timer', 'scoreboard_timer']) {
+            if (!isNumber(data[key])) fail(`Invalid ${key}`);
+        }
+        if (data.wave_speed <= 0) fail('Invalid wave_speed');
+        for (const key of ['wave_active', 'second_wave_active', 'game_over']) {
+            if (typeof data[key] !== 'boolean') fail(`Invalid ${key}`);
+        }
+        for (const key of ['wave_start_sector', 'current_wave_sector', 'second_wave_start_sector', 'second_current_wave_sector']) {
+            if (!isSectorIndex(data[key], n)) fail(`Invalid ${key}`);
+        }
+        if (data.wave_active && data.current_wave_sector < 0) fail('Active wave has no current sector');
+        if (data.second_wave_active && data.second_current_wave_sector < 0) fail('Active second wave has no current sector');
+        if (!Array.isArray(data.unlocks)) fail('Invalid unlocks');
+
+        if (data.mode === 'challenge') {
+            const c = data.challenge;
+            if (!c || typeof c !== 'object') fail('Challenge save has no challenge state');
+            if (!CHALLENGE_STATUSES.includes(c.status)) fail('Unknown challenge status');
+            for (const key of ['target_waves', 'time_limit', 'time_remaining']) {
+                if (!isNumber(c[key])) fail(`Invalid challenge ${key}`);
+            }
+        } else if (data.challenge !== null) {
+            fail('Practice save has challenge state');
+        }
+    }
+
+    /**
+     * Rebuild a game from a serialize() snapshot.
+     * @throws {SaveError} if the snapshot is invalid or from another version
+     */
+    static deserialize(data, rng = Math.random) {
+        WaveGame.validate_save(data);
+
+        const game = new WaveGame(data.num_sectors, data.venue, data.weather, data.difficulty, rng, data.mode);
+        data.sectors.forEach((saved, i) => {
+            const sector = game.sectors[i];
+            sector.size = saved.size;
+            sector.state = saved.state;
+            sector.energy = saved.energy;
+            sector.fatigue = saved.fatigue;
+            sector.enthusiasm = saved.enthusiasm;
+            sector.distractions = saved.distractions;
+            sector.timer = saved.timer;
+        });
+
+        for (const key of ['score', 'combo', 'max_combo', 'time_elapsed', 'successful_waves', 'failed_waves',
+            'stadium_level', 'wave_active', 'wave_start_sector', 'current_wave_sector', 'wave_timer',
+            'wave_speed', 'wave_pattern', 'wave_direction', 'speed_increment', 'sectors_traveled',
+            'second_wave_active', 'second_wave_start_sector', 'second_current_wave_sector',
+            'second_wave_timer', 'boost_charges', 'boost_recharge_timer', 'hype_cooldown_remaining',
+            'mascot_timer', 'scoreboard_timer', 'game_over']) {
+            game[key] = data[key];
+        }
+        game.unlocks = [...data.unlocks];
+        game.challenge = data.challenge ? { ...data.challenge } : null;
+        return game;
+    }
+
+    save_state() {
+        return JSON.stringify(this.serialize());
+    }
+
+    /**
+     * Replace this game's state with a save_state() snapshot.
+     * @throws {SaveError|SyntaxError} if the save is unreadable or incompatible
+     */
     load_state(json_str) {
-        const state = JSON.parse(json_str);
-        this.score = state.score || 0;
-        this.max_combo = state.max_combo || 0;
-        this.successful_waves = state.successful_waves || 0;
-        this.stadium_level = state.stadium_level || 1;
-        this.unlocks = state.unlocks || [];
+        const restored = WaveGame.deserialize(JSON.parse(json_str), this.rng);
+        Object.assign(this, restored, { rng: this.rng, events: [] });
     }
 }
 
@@ -776,12 +932,29 @@ export const gameAPI = {
         return this.game.save_state();
     },
 
+    /**
+     * Replace the current game with a saved one. The current game is kept
+     * if the save cannot be restored.
+     */
     load_game(save_data) {
         try {
-            this.game.load_state(save_data);
+            const game = WaveGame.deserialize(JSON.parse(save_data));
+            this.game = game;
             return JSON.stringify({ status: 'loaded' });
         } catch (e) {
             return JSON.stringify({ status: 'error', message: e.message });
+        }
+    },
+
+    /**
+     * Check whether a save can be restored, without loading it
+     */
+    check_save(save_data) {
+        try {
+            WaveGame.validate_save(JSON.parse(save_data));
+            return JSON.stringify({ valid: true });
+        } catch (e) {
+            return JSON.stringify({ valid: false, message: e.message });
         }
     },
 

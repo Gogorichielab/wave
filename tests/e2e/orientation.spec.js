@@ -100,9 +100,11 @@ test.describe('Orientation and Persistence Handling', () => {
 
     // Validate it's valid JSON with expected fields
     const parsedState = JSON.parse(savedState);
-    expect(parsedState).toHaveProperty('gameState');
-    expect(parsedState).toHaveProperty('timestamp');
-    expect(parsedState).toHaveProperty('difficulty');
+    expect(parsedState).toHaveProperty('format');
+    expect(parsedState).toHaveProperty('savedAt');
+    expect(parsedState).toHaveProperty('stats');
+    expect(parsedState.engine).toHaveProperty('version');
+    expect(parsedState.engine).toHaveProperty('difficulty');
   });
 
   test('should save game state when tab becomes hidden', async ({ page }) => {
@@ -201,7 +203,7 @@ test.describe('Orientation and Persistence Handling', () => {
       if (!data) return null;
 
       const parsed = JSON.parse(data);
-      const age = Date.now() - parsed.timestamp;
+      const age = Date.now() - parsed.savedAt;
 
       // Should be saved within last 2 seconds
       return age < 2000;

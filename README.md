@@ -39,7 +39,7 @@ A browser-based interactive game where players orchestrate the stadium "wave" by
 - **Frontend**: HTML5 Canvas for real-time crowd visualization
 - **Game Engine**: Plain JavaScript module (`engine.js`) bundled by Vite
 - **Rendering**: JavaScript handles smooth 60fps animations
-- **Persistence**: LocalStorage for save/load functionality
+- **Persistence**: LocalStorage holds a versioned, complete engine snapshot (`WaveGame.serialize()`) plus UI settings and session stats
 
 ### Game Architecture
 
@@ -118,7 +118,7 @@ npm run test:e2e:prod
 3. **Build Combos**: Keep the wave going by maintaining high energy levels
 4. **Boost Energy**: Right-click sectors with low energy to boost them
 5. **Score Points**: Complete full stadium waves for bonus points
-6. **Save Progress**: Use the save button to preserve your high scores
+6. **Save Progress**: Your run is saved automatically (every 30 seconds, on pause, when the tab is hidden or closed, and when you return to setup). Choose **Continue** on the setup screen to resume exactly where you left off, even mid-wave, or **New Game** to start fresh.
 
 ### Difficulty
 
