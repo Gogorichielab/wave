@@ -147,6 +147,13 @@ Boost charges and the Scoreboard Hype cooldown are shown in the control bar.
 - Full stadium completion: 100 points + combo bonus
 - Combos increase with consecutive successful sector waves
 
+### Reading the Crowd
+
+- **✓** above a sector number means the engine will let it join the next wave; **!** means it would stop the wave. Select a sector to see why (still standing, distracted, tired, or low energy).
+- A dashed outline and arrow mark the next sector for each wave front (pink for the second front of a double wave).
+- When a wave fails, the sector that stopped it flashes red with **✕**, and the message explains the cause and what to do.
+- Select a sector by tapping it, clicking it, or with **←/→**, then use **⚡ Boost** or **B**.
+
 ### Tips
 
 - Watch the energy bars under sector numbers

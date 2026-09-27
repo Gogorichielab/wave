@@ -728,7 +728,8 @@
             <p>Click or tap any crowd sector to start the wave!</p>
             <p>Keep the energy high and the combo going.</p>
             <p>⚡ <strong>Right-click or long press</strong> sectors to boost their energy. Boosts are limited and recharge over time.</p>
-            <p>⌨️ <strong>Spacebar</strong> starts wave at sector 0.</p>
+            <p>✓ marks sectors ready to join; <strong>!</strong> marks sectors that would stop the wave.</p>
+            <p>⌨️ <strong>←/→</strong> select a sector, <strong>Space</strong> starts the wave there, <strong>B</strong> boosts it.</p>
             <div class="settings-panel">
                 <label>
                     <input type="checkbox" id="sound-toggle" checked>
@@ -799,7 +800,11 @@
                 <li>📱 <strong>Long press</strong> sector to boost (mobile)</li>
                 <li>⚡ Boosts use a charge; charges recharge over time</li>
                 <li>📣 Scoreboard Hype boosts everyone, then needs to cool down</li>
-                <li>⌨️ <strong>Space</strong> to start wave at sector 0</li>
+                <li>📱 <strong>Tap</strong> a sector during a wave to select it, then press <strong>⚡ Boost</strong></li>
+                <li>⌨️ <strong>←/→</strong> select a sector</li>
+                <li>⌨️ <strong>Space</strong> (or <strong>Enter</strong>) starts a wave at the selected sector (sector 0 if none)</li>
+                <li>⌨️ <strong>B</strong> boosts the selected sector</li>
+                <li>✓ ready to join the wave, <strong>!</strong> not ready; dashed outline and arrow show where the wave goes next</li>
                 <li>⌨️ <strong>P</strong> to pause/resume</li>
                 <li>⌨️ <strong>F</strong> for fullscreen</li>
                 <li>⌨️ <strong>H</strong> to toggle this help</li>
@@ -834,11 +839,13 @@
             <div class="stat-item">⏱️ Time: <span id="game-time">0:00</span></div>
             <div class="stat-item">🎯 Accuracy: <span id="accuracy">100%</span></div>
             <div class="stat-item">🔥 Streak: <span id="streak">0</span></div>
+            <div class="stat-item" aria-live="polite">🎯 <span id="selected-sector-info">Tap a sector to select it</span></div>
             <div class="stat-item hidden" id="challenge-item">🏁 Challenge: <span id="challenge-progress">0/3</span> waves, <span id="challenge-time">1:30</span> left</div>
         </div>
 
         <div id="controls" class="hidden">
             <button id="mascot-btn">🐾 Mascot Moment</button>
+            <button id="boost-btn" disabled title="Boost the selected sector (B)">⚡ Boost</button>
             <span id="boost-status" class="resource-status" aria-live="polite">⚡ Boosts</span>
             <button id="scoreboard-btn">📣 Scoreboard Hype</button>
             <button id="setup-btn">🔄 Back to Setup</button>

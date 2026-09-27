@@ -61,6 +61,9 @@ export const CHALLENGE = {
 const AMBIENT_SCOREBOARD_INTERVAL = 45;
 const SCOREBOARD_BOOST = 0.2;
 
+// Distraction or fatigue at or above this is reported as the reason a sector is not ready
+const NOTABLE_DRAG = 0.15;
+
 // Seconds a sector anticipates before standing once the wave reaches it
 const STAND_DELAY = 0.2;
 // Accelerating waves shorten each sector interval by this much, down to the minimum
@@ -117,10 +120,36 @@ export class CrowdSector {
         }
     }
 
+    readiness() {
+        return (this.energy * this.enthusiasm) - (this.fatigue + this.distractions);
+    }
+
     can_wave() {
-        const readiness = (this.energy * this.enthusiasm) - (this.fatigue + this.distractions);
-        return readiness > this._readiness_threshold &&
-               (this.state === SectorState.IDLE || this.state === SectorState.SEATED);
+        return this.block_reason() === null;
+    }
+
+    /**
+     * Why this sector would refuse a wave right now, or null if it is ready.
+     * One of: standing, anticipating, distracted, fatigued, low_energy.
+     */
+    block_reason() {
+        if (this.state === SectorState.STANDING) {
+            return 'standing';
+        }
+        if (this.state === SectorState.ANTICIPATING) {
+            return 'anticipating';
+        }
+        if (this.readiness() > this._readiness_threshold) {
+            return null;
+        }
+        // Name the largest drag on readiness
+        if (this.distractions >= NOTABLE_DRAG && this.distractions >= this.fatigue) {
+            return 'distracted';
+        }
+        if (this.fatigue >= NOTABLE_DRAG) {
+            return 'fatigued';
+        }
+        return 'low_energy';
     }
 
     start_wave() {
@@ -160,7 +189,11 @@ export class CrowdSector {
             energy: this.energy,
             fatigue: this.fatigue,
             enthusiasm: this.enthusiasm,
-            distractions: this.distractions
+            distractions: this.distractions,
+            fatigue: this.fatigue,
+            readiness: this.readiness(),
+            ready: this.can_wave(),
+            block_reason: this.block_reason()
         };
     }
 }
@@ -492,7 +525,9 @@ export class WaveGame {
             return;
         }
 
-        if (this.sectors[next_sector_id].start_wave()) {
+        const next_sector = this.sectors[next_sector_id];
+        const reason = next_sector.block_reason();
+        if (next_sector.start_wave()) {
             if (isSecondWave) {
                 this.second_current_wave_sector = next_sector_id;
             } else {
@@ -500,7 +535,12 @@ export class WaveGame {
             }
         } else {
             // Wave failed; a failure on either front ends both
-            this.fail_wave();
+            this.fail_wave({
+                sector: next_sector_id,
+                from_sector: currentSector,
+                front: isSecondWave ? 'secondary' : 'primary',
+                reason,
+            });
         }
     }
 
@@ -534,15 +574,28 @@ export class WaveGame {
         }
     }
 
-    fail_wave() {
+    /**
+     * @param {{sector: number, from_sector: number, front: string, reason: string}} blocked
+     *   the sector that refused the wave, and why
+     */
+    fail_wave(blocked = null) {
         this.wave_active = false;
         this.second_wave_active = false;
         this.failed_waves += 1;
         this.combo = 0;
         this.schedule_event('wave_failed', {
-            sector: this.current_wave_sector,
+            sector: blocked ? blocked.sector : this.current_wave_sector,
+            from_sector: blocked ? blocked.from_sector : this.current_wave_sector,
+            front: blocked ? blocked.front : 'primary',
+            reason: blocked ? blocked.reason : null,
             pattern: this.wave_pattern
         });
+    }
+
+    _nextSector(currentSector, startSector) {
+        const next = (currentSector + this.wave_direction + this.num_sectors) % this.num_sectors;
+        // The front ends instead of moving on once it is back at its start
+        return next === startSector ? -1 : next;
     }
 
     /**
@@ -631,6 +684,12 @@ export class WaveGame {
             wave_direction: this.wave_direction,
             second_wave_active: this.second_wave_active,
             second_current_wave_sector: this.second_current_wave_sector,
+            next_wave_sector: this.wave_active
+                ? this._nextSector(this.current_wave_sector, this.wave_start_sector)
+                : -1,
+            second_next_wave_sector: this.second_wave_active
+                ? this._nextSector(this.second_current_wave_sector, this.second_wave_start_sector)
+                : -1,
             venue: this.venue,
             weather: this.weather,
             difficulty: this.difficulty,

@@ -26,6 +26,8 @@ let masterVolume = 1;
 let difficulty = 'medium';
 let gameMode = 'practice';
 let hoveredSector = -1;
+let selectedSector = -1; // chosen by tap, click, or arrow keys; target of the Boost button
+let blockedSectorFlash = null; // { sector, until } highlights the sector that stopped a wave
 let fieldType = 'soccer';
 let stadiumType = 'classic';
 let weatherType = 'sunny';
@@ -74,6 +76,26 @@ const SOUND_PROFILES = {
         release: 0.25
     }
 };
+
+// Short labels for the engine's sector block reasons
+const READINESS_LABELS = {
+    standing: 'Still standing',
+    anticipating: 'Getting ready',
+    distracted: 'Distracted',
+    fatigued: 'Tired',
+    low_energy: 'Low energy'
+};
+
+// What to tell the player when a sector refuses the wave
+const FAILURE_HINTS = {
+    standing: 'was still standing. Give sectors time to sit before the wave returns.',
+    anticipating: 'was already getting ready. Wait for the current wave to pass.',
+    distracted: 'was distracted by the mascot. Boost it to refocus the crowd.',
+    fatigued: 'was too tired. Let it rest, or boost it before the wave arrives.',
+    low_energy: 'ran out of energy. Boost it before the wave arrives.'
+};
+
+const BLOCKED_FLASH_MS = 2500;
 
 // Canvas settings
 const STADIUM_RADIUS = 250;
@@ -604,7 +626,10 @@ function handleGameEvent(event) {
             currentStreak++;
             break;
         case 'wave_failed':
-            showNotification('Wave Failed!', 'failure');
+            showNotification(describeWaveFailure(event.data), 'failure');
+            if (event.data && typeof event.data.sector === 'number') {
+                blockedSectorFlash = { sector: event.data.sector, until: performance.now() + BLOCKED_FLASH_MS };
+            }
             playSound('fail');
             currentStreak = 0;
             break;
@@ -653,6 +678,18 @@ function showChallengeResult(won, data) {
 
 function hideChallengeResult() {
     document.getElementById('result-overlay').classList.add('hidden');
+}
+
+/**
+ * Explain which sector stopped the wave, why, and what to do about it
+ */
+function describeWaveFailure(data) {
+    if (!data || typeof data.sector !== 'number') {
+        return 'Wave Failed!';
+    }
+    const front = data.front === 'secondary' ? 'Second wave failed' : 'Wave failed';
+    const hint = FAILURE_HINTS[data.reason] || 'could not join the wave.';
+    return `${front}: Sector ${data.sector} ${hint}`;
 }
 
 /**
@@ -915,6 +952,42 @@ function triggerStadiumEvent(eventType, sectorId = null) {
 }
 
 /**
+ * Select a sector as the target for the Boost button and keyboard actions
+ */
+function selectSector(sectorId) {
+    if (!gameState) return;
+    const total = gameState.sectors.length;
+    selectedSector = ((sectorId % total) + total) % total;
+}
+
+// Enter on a focused control should activate that control, not the game
+function isInteractiveElement(element) {
+    return !!element && ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(element.tagName);
+}
+
+function isWaveRunning() {
+    return !!gameState && (gameState.wave_active || gameState.second_wave_active);
+}
+
+/**
+ * Tap or click: select the sector, and start a wave there if none is running
+ */
+function activateSector(sectorId) {
+    selectSector(sectorId);
+    if (!isWaveRunning()) {
+        startWave(sectorId);
+    }
+}
+
+function boostSelectedSector() {
+    if (selectedSector < 0) {
+        showNotification('Select a sector to boost first', 'failure');
+        return;
+    }
+    boostSector(selectedSector);
+}
+
+/**
  * Use the player's Scoreboard Hype, which is limited by a cooldown
  */
 function useScoreboardHype() {
@@ -1017,6 +1090,8 @@ function precomputeSectorPaths(totalSectors, centerX, centerY) {
         sectorPaths[i] = {
             path,
             angle,
+            centerX,
+            centerY,
             startAngle,
             endAngle,
             innerRadius,
@@ -1991,6 +2066,81 @@ function drawField() {
     }
 }
 
+/**
+ * Draw readiness marks, upcoming-sector cues, the selected sector, and the
+ * sector that last blocked a wave. Marks use shapes and text, not only color.
+ */
+function drawSectorGuides(sectors) {
+    const total = sectors.length;
+
+    // Readiness marks: a check when the engine says the sector can join,
+    // an exclamation mark when it cannot
+    ctx.font = 'bold 13px Arial';
+    for (let i = 0; i < total; i++) {
+        const geom = getSectorGeometry(i, total);
+        const ready = sectors[i].ready;
+        ctx.fillStyle = ready ? '#4ade80' : '#fbbf24';
+        ctx.fillText(ready ? '✓' : '!', geom.textX, geom.textY - 17);
+    }
+    ctx.font = 'bold 16px Arial';
+
+    // Upcoming sector for each active front, with its travel direction
+    const direction = gameState.wave_direction || 1;
+    drawNextSectorCue(gameState.next_wave_sector, total, direction, 'rgba(255, 255, 255, 0.95)');
+    drawNextSectorCue(gameState.second_next_wave_sector, total, direction, 'rgba(255, 120, 255, 0.95)');
+
+    if (selectedSector >= 0 && selectedSector < total) {
+        strokeSector(selectedSector, total, '#facc15', 4, []);
+    }
+
+    if (blockedSectorFlash) {
+        if (performance.now() < blockedSectorFlash.until && blockedSectorFlash.sector < total) {
+            strokeSector(blockedSectorFlash.sector, total, '#ef4444', 4, [4, 3]);
+            const geom = getSectorGeometry(blockedSectorFlash.sector, total);
+            ctx.fillStyle = '#ef4444';
+            ctx.fillText('✕', geom.textX, geom.textY - 34);
+        } else {
+            blockedSectorFlash = null;
+        }
+    }
+}
+
+function strokeSector(index, total, color, width, dash) {
+    const geom = getSectorGeometry(index, total);
+    if (!geom.path) return;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.setLineDash(dash);
+    ctx.stroke(geom.path);
+    ctx.restore();
+}
+
+function drawNextSectorCue(index, total, direction, color) {
+    if (typeof index !== 'number' || index < 0 || index >= total) return;
+
+    strokeSector(index, total, color, 3, [6, 4]);
+
+    // Arrow just inside the ring, pointing along the wave's travel direction
+    const geom = getSectorGeometry(index, total);
+    const radius = geom.innerRadius - 14;
+    const x = geom.centerX + Math.cos(geom.angle) * radius;
+    const y = geom.centerY + Math.sin(geom.angle) * radius;
+    const heading = geom.angle + (direction >= 0 ? Math.PI / 2 : -Math.PI / 2);
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(heading);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(12, 0);
+    ctx.lineTo(-8, -9);
+    ctx.lineTo(-8, 9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+
 function drawEventIndicators() {
     if (!gameState || activeEventIndicators.length === 0) return;
 
@@ -2076,6 +2226,8 @@ function render() {
     sectors.forEach((sector, index) => {
         drawSector(sector, index, sectors.length);
     });
+
+    drawSectorGuides(sectors);
 
     drawEventIndicators();
 
@@ -2202,6 +2354,16 @@ function updateResourceControls() {
         ? ` (+1 in ${Math.ceil(gameState.boost_recharge_remaining)}s)`
         : '';
     setHudText('boost-status', `⚡ Boosts ${charges}/${gameState.max_boost_charges}${recharge}`);
+
+    const selected = selectedSector >= 0 ? gameState.sectors[selectedSector] : null;
+    setHudText('boost-btn', selected ? `⚡ Boost ${selectedSector}` : '⚡ Boost');
+    const boostDisabled = !selected || charges < 1;
+    if (hudElements['boost-btn'] && hudElements['boost-btn'].disabled !== boostDisabled) {
+        hudElements['boost-btn'].disabled = boostDisabled;
+    }
+    setHudText('selected-sector-info', selected
+        ? `Sector ${selectedSector}: ${selected.ready ? '✓ Ready' : '! ' + (READINESS_LABELS[selected.block_reason] || 'Not ready')}`
+        : 'Tap a sector to select it');
 
     const hypeRemaining = Math.ceil(gameState.hype_cooldown_remaining);
     setHudText('scoreboard-btn', hypeRemaining > 0
@@ -2390,7 +2552,7 @@ function setupInputHandlers() {
         
         const sectorId = getSectorAtPosition(x, y);
         if (sectorId >= 0) {
-            startWave(sectorId);
+            activateSector(sectorId);
         }
     });
     
@@ -2405,6 +2567,7 @@ function setupInputHandlers() {
         
         const sectorId = getSectorAtPosition(x, y);
         if (sectorId >= 0) {
+            selectSector(sectorId);
             boostSector(sectorId);
         }
     });
@@ -2451,9 +2614,10 @@ function setupInputHandlers() {
             // Long press (>500ms) = boost energy
             // Short tap = start wave
             if (touchDuration > 500) {
+                selectSector(touchStartSector);
                 boostSector(touchStartSector);
             } else {
-                startWave(touchStartSector);
+                activateSector(touchStartSector);
             }
         }
 
@@ -2468,7 +2632,18 @@ function setupInputHandlers() {
         
         if (e.code === 'Space' && !isPaused) {
             e.preventDefault();
-            startWave(0);
+            startWave(selectedSector >= 0 ? selectedSector : 0);
+        } else if ((e.code === 'ArrowRight' || e.code === 'ArrowLeft') && !isPaused) {
+            e.preventDefault();
+            const step = e.code === 'ArrowRight' ? 1 : -1;
+            selectSector(selectedSector >= 0 ? selectedSector + step : 0);
+        } else if (e.code === 'Enter' && !isPaused && selectedSector >= 0 &&
+                   !isInteractiveElement(e.target)) {
+            e.preventDefault();
+            startWave(selectedSector);
+        } else if (e.code === 'KeyB' && !isPaused) {
+            e.preventDefault();
+            boostSelectedSector();
         } else if (e.code === 'KeyP') {
             e.preventDefault();
             togglePause();
@@ -2507,6 +2682,14 @@ function setupInputHandlers() {
                 ? hoveredSector
                 : Math.floor(Math.random() * gameState.sectors.length);
             triggerStadiumEvent('mascot', targetSector);
+        });
+    }
+
+    const boostBtn = document.getElementById('boost-btn');
+    if (boostBtn) {
+        addTrackedEventListener(boostBtn, 'click', () => {
+            if (!gameState || isPaused) return;
+            boostSelectedSector();
         });
     }
 
@@ -2645,6 +2828,8 @@ function startGame() {
     resetFieldGradients();
     sectorColorCache.clear();
     resetEventIndicators();
+    selectedSector = -1;
+    blockedSectorFlash = null;
 
     initGame();
     startGameLoop();
@@ -2677,6 +2862,8 @@ function restartGame() {
     // Re-initialize game
     resetFieldGradients();
     resetEventIndicators();
+    selectedSector = -1;
+    blockedSectorFlash = null;
     initGame();
     startGameLoop();
 }
@@ -2689,6 +2876,8 @@ function returnToSetup() {
     isPaused = false;
     gameState = null;
     hoveredSector = -1;
+    selectedSector = -1;
+    blockedSectorFlash = null;
     resetFieldGradients();
     resetEventIndicators();
 
