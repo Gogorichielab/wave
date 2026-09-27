@@ -50,6 +50,13 @@ export const DIFFICULTY_PRESETS = {
     },
 };
 
+// Challenge mode: complete a number of waves before the clock runs out.
+// Practice mode has no objective or end state.
+export const CHALLENGE = {
+    target_waves: 3,
+    time_limit: 90,
+};
+
 // Ambient scoreboard hype plays on the same schedule on every difficulty
 const AMBIENT_SCOREBOARD_INTERVAL = 45;
 const SCOREBOARD_BOOST = 0.2;
@@ -159,7 +166,7 @@ export class CrowdSector {
 }
 
 export class WaveGame {
-    constructor(num_sectors = 16, venue = 'soccer', weather = 'sunny', difficulty = 'medium', rng = Math.random) {
+    constructor(num_sectors = 16, venue = 'soccer', weather = 'sunny', difficulty = 'medium', rng = Math.random, mode = 'practice') {
         // Injectable random source so tests can run deterministic scenarios
         this.rng = rng;
         this.num_sectors = num_sectors;
@@ -211,6 +218,18 @@ export class WaveGame {
         // Ambient stadium events
         this.mascot_timer = 0.0;
         this.scoreboard_timer = 0.0;
+
+        // Game mode and challenge progress
+        this.mode = mode === 'challenge' ? 'challenge' : 'practice';
+        this.game_over = false;
+        this.challenge = this.mode === 'challenge'
+            ? {
+                target_waves: CHALLENGE.target_waves,
+                time_limit: CHALLENGE.time_limit,
+                time_remaining: CHALLENGE.time_limit,
+                status: 'running',  // running, won, lost
+            }
+            : null;
     }
 
     _applyModifiers() {
@@ -268,7 +287,7 @@ export class WaveGame {
 
     start_wave(sector_id, pattern = null) {
         // A double wave's second front can still be running after the first finishes
-        if (this.wave_active || this.second_wave_active) {
+        if (this.game_over || this.wave_active || this.second_wave_active) {
             return false;
         }
 
@@ -334,6 +353,11 @@ export class WaveGame {
             dt = 0.0;
         }
 
+        // A finished challenge freezes the simulation until a new run starts
+        if (this.game_over) {
+            return;
+        }
+
         this.time_elapsed += dt;
 
         for (const sector of this.sectors) {
@@ -352,6 +376,31 @@ export class WaveGame {
         if (this.second_wave_active) {
             this._updateWave(dt, true);
         }
+
+        this._updateChallenge(dt);
+    }
+
+    _updateChallenge(dt) {
+        if (!this.challenge || this.challenge.status !== 'running') {
+            return;
+        }
+        this.challenge.time_remaining = Math.max(0, this.challenge.time_remaining - dt);
+        if (this.challenge.time_remaining <= 0) {
+            this._finishChallenge('lost');
+        }
+    }
+
+    _finishChallenge(status) {
+        this.challenge.status = status;
+        this.game_over = true;
+        this.wave_active = false;
+        this.second_wave_active = false;
+        this.schedule_event(status === 'won' ? 'challenge_completed' : 'challenge_failed', {
+            waves: this.successful_waves,
+            target_waves: this.challenge.target_waves,
+            time_used: this.challenge.time_limit - this.challenge.time_remaining,
+            score: this.score,
+        });
     }
 
     _updateResources(dt) {
@@ -478,6 +527,11 @@ export class WaveGame {
             bonus: bonus,
             pattern: this.wave_pattern
         });
+
+        if (this.challenge && this.challenge.status === 'running' &&
+            this.successful_waves >= this.challenge.target_waves) {
+            this._finishChallenge('won');
+        }
     }
 
     fail_wave() {
@@ -588,6 +642,9 @@ export class WaveGame {
                 : 0,
             hype_cooldown: this.tuning.hype_cooldown,
             hype_cooldown_remaining: this.hype_cooldown_remaining,
+            mode: this.mode,
+            game_over: this.game_over,
+            challenge: this.challenge ? { ...this.challenge } : null,
         };
     }
 
@@ -611,8 +668,8 @@ export class WaveGame {
 export const gameAPI = {
     game: null,
 
-    init_game(num_sectors = 16, venue = 'soccer', weather = 'sunny', difficulty = 'medium') {
-        this.game = new WaveGame(num_sectors, venue, weather, difficulty);
+    init_game(num_sectors = 16, venue = 'soccer', weather = 'sunny', difficulty = 'medium', mode = 'practice') {
+        this.game = new WaveGame(num_sectors, venue, weather, difficulty, Math.random, mode);
         return JSON.stringify({ status: 'initialized', sectors: num_sectors });
     },
     

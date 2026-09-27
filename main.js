@@ -24,6 +24,7 @@ let masterGain = null;
 let compressor = null;
 let masterVolume = 1;
 let difficulty = 'medium';
+let gameMode = 'practice';
 let hoveredSector = -1;
 let fieldType = 'soccer';
 let stadiumType = 'classic';
@@ -543,7 +544,7 @@ function shouldRenderDetailedAnimations() {
  */
 function initGame() {
     try {
-        const result = gameAPI.init_game(16, fieldType, weatherType, difficulty);
+        const result = gameAPI.init_game(16, fieldType, weatherType, difficulty, gameMode);
         console.log('Game initialized:', result);
         return true;
     } catch (error) {
@@ -621,7 +622,37 @@ function handleGameEvent(event) {
             addEventIndicator('scoreboard', event.data || {});
             playSound('powerup');
             break;
+        case 'challenge_completed':
+        case 'challenge_failed':
+            showChallengeResult(event.type === 'challenge_completed', event.data);
+            break;
     }
+}
+
+/**
+ * End a challenge run and show its result with a retry option
+ */
+function showChallengeResult(won, data) {
+    // Play before stopping: stopping the loop disconnects the audio graph
+    playSound(won ? 'success' : 'fail');
+    // Refresh the stats panel while the loop is still marked running
+    updateStats(0);
+    stopGameLoop();
+    // Draw the final state so the HUD matches the result
+    render();
+
+    document.getElementById('result-title').textContent = won
+        ? '🏆 Challenge Complete!'
+        : "⏱️ Time's Up!";
+    document.getElementById('result-summary').textContent = won
+        ? `${data.waves}/${data.target_waves} waves in ${formatTime(data.time_used)}. Score: ${data.score}`
+        : `${data.waves}/${data.target_waves} waves completed. Score: ${data.score}`;
+    document.getElementById('result-overlay').classList.remove('hidden');
+    document.getElementById('retry-btn').focus();
+}
+
+function hideChallengeResult() {
+    document.getElementById('result-overlay').classList.add('hidden');
 }
 
 /**
@@ -832,6 +863,13 @@ function updateStats(dt) {
 
     // Update streak
     setHudText('streak', String(currentStreak));
+
+    // Update challenge progress
+    const challenge = gameState && gameState.challenge;
+    if (challenge) {
+        setHudText('challenge-progress', `${gameState.successful_waves}/${challenge.target_waves}`);
+        setHudText('challenge-time', formatTime(Math.ceil(challenge.time_remaining)));
+    }
 }
 
 /**
@@ -2458,6 +2496,8 @@ function setupInputHandlers() {
     addTrackedEventListener(document.getElementById('resume-btn'), 'click', togglePause);
     addTrackedEventListener(document.getElementById('restart-btn'), 'click', restartGame);
     addTrackedEventListener(document.getElementById('setup-btn'), 'click', returnToSetup);
+    addTrackedEventListener(document.getElementById('retry-btn'), 'click', restartGame);
+    addTrackedEventListener(document.getElementById('result-setup-btn'), 'click', returnToSetup);
 
     const mascotBtn = document.getElementById('mascot-btn');
     if (mascotBtn) {
@@ -2590,6 +2630,9 @@ function startGame() {
     // Get settings
     soundEnabled = document.getElementById('sound-toggle').checked;
     difficulty = document.getElementById('difficulty-select').value;
+    const modeSelectElem = document.getElementById('mode-select');
+    gameMode = modeSelectElem ? modeSelectElem.value : 'practice';
+    document.getElementById('challenge-item').classList.toggle('hidden', gameMode !== 'challenge');
     const fieldTypeSelectElem = document.getElementById('field-type-select');
     const stadiumTypeSelectElem = document.getElementById('stadium-type-select');
     const weatherSelectElem = document.getElementById('weather-select');
@@ -2621,8 +2664,9 @@ function restartGame() {
     successfulWaves = 0;
     currentStreak = 0;
     
-    // Hide pause overlay if it's showing
+    // Hide pause and result overlays if they're showing
     document.getElementById('pause-overlay').classList.add('hidden');
+    hideChallengeResult();
     isPaused = false;
     
     // Reset pause button
@@ -2653,6 +2697,7 @@ function returnToSetup() {
     pauseBtn.title = 'Pause Game';
 
     document.getElementById('pause-overlay').classList.add('hidden');
+    hideChallengeResult();
     document.getElementById('help-overlay').classList.add('hidden');
     document.getElementById('hud').classList.add('hidden');
     document.getElementById('controls').classList.add('hidden');

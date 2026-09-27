@@ -136,6 +136,11 @@ Difficulty is applied by the engine (`DIFFICULTY_PRESETS` in `engine.js`):
 
 Boost charges and the Scoreboard Hype cooldown are shown in the control bar.
 
+### Modes
+
+- **Practice**: no time limit or objective.
+- **Challenge**: complete 3 waves within 90 seconds. Progress and time left appear in the stats panel, and a result screen offers Retry or Back to Setup.
+
 ### Scoring
 
 - Basic wave participation: 10 points × combo multiplier
