@@ -10,7 +10,4 @@ export default defineConfig({
     assetsDir: 'assets',
     sourcemap: true,
   },
-  optimizeDeps: {
-    exclude: ['pyodide'],
-  },
 });

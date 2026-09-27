@@ -663,9 +663,8 @@
         <div id="game-title" class="hidden" aria-live="polite">Fan Wave</div>
         
         <div id="loading">
-            <h2>Loading Python Game Engine...</h2>
+            <h2>Loading Game...</h2>
             <div class="spinner"></div>
-            <p style="margin-top: 20px;">Initializing Pyodide runtime</p>
         </div>
 
         <div id="hud" class="hidden" role="region" aria-label="Game statistics">
@@ -814,7 +813,6 @@
         window.addEventListener('resize', debounce(setViewportHeight, 100));
         window.addEventListener('orientationchange', setViewportHeight);
     </script>
-    <script defer src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
     <script type="module" src="/main.js"></script>
 </body>
 </html>

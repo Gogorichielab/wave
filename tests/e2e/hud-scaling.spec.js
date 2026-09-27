@@ -5,7 +5,7 @@ const { test, expect } = require('@playwright/test');
 
 test.describe('HUD Scaling', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:3000');
+    await page.goto('/');
     await page.waitForSelector('#start-btn', { timeout: 30000 });
     await page.click('#start-btn');
     await page.waitForSelector('#hud:not(.hidden)');

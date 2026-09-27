@@ -12,18 +12,18 @@ test.describe('Stadium Wave Game', () => {
     await expect(canvas).toBeVisible();
   });
 
-  test('should show loading screen initially', async ({ page }) => {
+  test('should hide loading screen once the engine is ready', async ({ page }) => {
     await page.goto('/');
-    
-    // Check for loading screen
-    const loading = page.locator('#loading');
-    await expect(loading).toBeVisible();
+
+    // The JavaScript engine is bundled, so loading finishes right away
+    await expect(page.locator('#loading')).toHaveClass(/hidden/);
+    await expect(page.locator('#start-btn')).toBeVisible();
   });
 
   test('should show tutorial', async ({ page }) => {
     await page.goto('/');
     
-    // Wait for Pyodide to load (may take a while)
+    // Wait for the engine to load
     await page.waitForSelector('#tutorial', { timeout: 30000 });
     
     const tutorial = page.locator('#tutorial');

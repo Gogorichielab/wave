@@ -37,13 +37,13 @@ A browser-based interactive game where players orchestrate the stadium "wave" by
 ### Technology Stack
 
 - **Frontend**: HTML5 Canvas for real-time crowd visualization
-- **Python Engine**: Game logic runs via Pyodide in the browser
+- **Game Engine**: Plain JavaScript module (`engine.js`) bundled by Vite
 - **Rendering**: JavaScript handles smooth 60fps animations
 - **Persistence**: LocalStorage for save/load functionality
 
 ### Game Architecture
 
-- **Python Game Engine Layer**: State management, wave propagation algorithms, scoring
+- **Engine Layer** (`engine.js`): State management, wave propagation algorithms, scoring
 - **JavaScript Rendering Layer**: Canvas-based crowd visualization with color-coded states
 - **UI Layer**: HUD displaying score, combo, and wave statistics
 
@@ -77,17 +77,12 @@ npm run dev
 
 The game will open in your browser at `http://localhost:3000`
 
-### Running with Python Engine (Pyodide)
+### Engine Architecture
 
-By default, the game attempts to load Pyodide from CDN to run the Python game engine in the browser. If Pyodide is unavailable (e.g., CDN blocked), the game automatically falls back to a JavaScript mock engine that provides the same functionality.
-
-To ensure Python engine works:
-
-- Ensure internet connection for CDN access
-- Check browser console for "Running with Python/Pyodide engine" message
-- If you see "Running with JavaScript mock engine", the fallback is active
-
-Both engines provide an identical gameplay experience.
+The game runs a single JavaScript engine (`engine.js`) that is bundled into the
+production build, so there is no runtime download or fallback path. To confirm
+which engine a deployed build is running, check `window.waveDiagnostics.engine`
+in the browser console.
 
 ## Development
 
@@ -106,11 +101,14 @@ npm run preview
 ### Run Tests
 
 ```bash
-# Python unit tests
+# Engine unit tests (node:test)
 npm test
 
-# E2E tests (requires dev server running)
+# E2E tests against the dev server
 npm run test:e2e
+
+# Build, then run the E2E suite against the production build (what CI runs)
+npm run test:e2e:prod
 ```
 
 ## How to Play
@@ -140,16 +138,17 @@ npm run test:e2e
 
 ```
 wave/
-├── game_engine.py       # Python game logic and state management
-├── mock_engine.js       # JavaScript fallback engine (same API as Python)
+├── engine.js            # Game engine: crowd simulation, waves, scoring
 ├── index.html           # Main HTML structure with canvas
-├── main.js              # JavaScript rendering and Pyodide integration
+├── main.js              # Rendering, input, and game loop
 ├── vite.config.js       # Vite bundler configuration
 ├── package.json         # Node dependencies and scripts
 ├── tests/
-│   ├── test_game_engine.py   # Python unit tests (21 tests)
+│   ├── unit/
+│   │   └── engine.test.js     # Engine unit tests
 │   └── e2e/
-│       └── game.spec.js       # Playwright E2E tests
+│       ├── game.spec.js       # Playwright E2E tests
+│       └── production.spec.js # Production build smoke tests
 └── README.md
 ```
 
