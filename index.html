@@ -210,8 +210,8 @@
         }
 
         #tutorial p {
-            margin: 15px 0;
-            line-height: 1.6;
+            margin: 10px 0;
+            line-height: 1.5;
         }
 
         #tutorial button {
@@ -223,6 +223,29 @@
             border-radius: 25px;
             cursor: pointer;
             margin-top: 20px;
+        }
+
+        /* Keep the start/continue actions visible while the panel scrolls */
+        #tutorial .tutorial-actions {
+            position: sticky;
+            bottom: -40px;
+            margin: 0 -40px -40px;
+            padding: 12px 20px 20px;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        #tutorial .tutorial-actions button {
+            margin-top: 0;
+        }
+
+        #save-notice {
+            color: #fca5a5;
+            flex-basis: 100%;
+            margin: 0;
         }
 
         .hidden {
@@ -533,6 +556,11 @@
                 max-height: 85%;
             }
 
+            #tutorial .tutorial-actions {
+                bottom: -25px;
+                margin: 0 -20px -25px;
+            }
+
             #tutorial h2 {
                 font-size: 1.5em;
                 margin-bottom: 15px;
@@ -728,8 +756,7 @@
             <p>Click or tap any crowd sector to start the wave!</p>
             <p>Keep the energy high and the combo going.</p>
             <p>⚡ <strong>Right-click or long press</strong> sectors to boost their energy. Boosts are limited and recharge over time.</p>
-            <p>✓ marks sectors ready to join; <strong>!</strong> marks sectors that would stop the wave.</p>
-            <p>⌨️ <strong>←/→</strong> select a sector, <strong>Space</strong> starts the wave there, <strong>B</strong> boosts it.</p>
+            <p>✓ ready, <strong>!</strong> would stop the wave. ⌨️ <strong>←/→</strong> select, <strong>Space</strong> start, <strong>B</strong> boost.</p>
             <div class="settings-panel">
                 <label>
                     <input type="checkbox" id="sound-toggle" checked>
@@ -785,7 +812,11 @@
                     </select>
                 </label>
             </div>
-            <button id="start-btn">Let's Go!</button>
+            <div class="tutorial-actions">
+                <p id="save-notice" class="hidden" role="alert"></p>
+                <button id="continue-btn" class="hidden">▶ Continue</button>
+                <button id="start-btn">Let's Go!</button>
+            </div>
         </div>
 
         <button id="help-toggle" class="hidden" title="Toggle Help">?</button>

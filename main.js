@@ -36,6 +36,9 @@ let weatherParticles = [];
 let activeEventIndicators = [];
 let lastAutoSaveTime = 0;
 const AUTO_SAVE_INTERVAL = 30000; // Auto-save every 30 seconds
+const SAVE_KEY = 'wave_game_state';
+const SAVE_FORMAT = 1; // version of the wrapper; the engine snapshot has its own version
+const SAVE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Event listener cleanup
 let eventListeners = [];
@@ -256,32 +259,22 @@ function loadSavedPerformanceTier() {
 }
 
 /**
- * Save game state to localStorage with quota error handling
+ * Save the current run to localStorage so it can be continued later.
+ * The save wraps the engine's complete snapshot with the UI-only settings
+ * and session statistics that the engine does not track.
  */
 function saveGameState() {
-    if (!gameState) return;
+    if (!gameState || gameState.game_over) return;
 
     try {
-        const gameData = {
-            gameState: gameState,
-            waveAttempts: waveAttempts,
-            successfulWaves: successfulWaves,
-            currentStreak: currentStreak,
-            totalGameTime: totalGameTime,
-            difficulty: difficulty,
-            fieldType: fieldType,
-            stadiumType: stadiumType,
-            timestamp: Date.now()
+        const save = {
+            format: SAVE_FORMAT,
+            savedAt: Date.now(),
+            engine: JSON.parse(gameAPI.save_game()),
+            ui: { stadiumType, timeOfDay },
+            stats: { waveAttempts, successfulWaves, currentStreak, totalGameTime }
         };
-
-        const serialized = JSON.stringify(gameData);
-
-        // Check if we're approaching quota limits (5MB typical limit)
-        if (serialized.length > 4 * 1024 * 1024) {
-            console.warn('Game state is large, may exceed localStorage quota');
-        }
-
-        localStorage.setItem('wave_game_state', serialized);
+        localStorage.setItem(SAVE_KEY, JSON.stringify(save));
     } catch (e) {
         if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
             console.error('localStorage quota exceeded. Cannot save game state.');
@@ -293,52 +286,39 @@ function saveGameState() {
 }
 
 /**
- * Load game state from localStorage
- * @returns {boolean} true if state was loaded successfully
+ * Read the saved run, if any.
+ * @returns {{status: 'none'} | {status: 'ok', save: object} | {status: 'invalid', message: string}}
  */
-function loadGameState() {
+function readSavedGame() {
+    let serialized;
     try {
-        const serialized = localStorage.getItem('wave_game_state');
-        if (!serialized) return false;
-
-        const gameData = JSON.parse(serialized);
-
-        // Validate the loaded data has required fields
-        if (!gameData.gameState || !gameData.timestamp) {
-            console.warn('Invalid game state data in localStorage');
-            return false;
-        }
-
-        // Check if saved state is not too old (e.g., 7 days)
-        const age = Date.now() - gameData.timestamp;
-        const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
-        if (age > maxAge) {
-            console.log('Saved game state is too old, starting fresh');
-            localStorage.removeItem('wave_game_state');
-            return false;
-        }
-
-        // Restore state
-        gameState = gameData.gameState;
-        waveAttempts = gameData.waveAttempts || 0;
-        successfulWaves = gameData.successfulWaves || 0;
-        currentStreak = gameData.currentStreak || 0;
-        totalGameTime = gameData.totalGameTime || 0;
-        difficulty = gameData.difficulty || 'medium';
-        fieldType = gameData.fieldType || 'soccer';
-        stadiumType = gameData.stadiumType || 'classic';
-
-        console.log('Game state loaded from localStorage');
-        return true;
+        serialized = localStorage.getItem(SAVE_KEY);
     } catch (e) {
-        console.warn('Could not load game state from localStorage:', e.message);
-        // Remove corrupted data
-        try {
-            localStorage.removeItem('wave_game_state');
-        } catch (removeError) {
-            // Ignore errors when trying to remove
+        return { status: 'none' };
+    }
+    if (!serialized) return { status: 'none' };
+
+    try {
+        const save = JSON.parse(serialized);
+        // Saves from before complete snapshots held only a render snapshot
+        // and could never be restored; drop them without alarming the player
+        if (save && save.format === undefined && save.gameState) {
+            clearGameState();
+            return { status: 'none' };
         }
-        return false;
+        if (!save || save.format !== SAVE_FORMAT || typeof save.savedAt !== 'number' || !save.engine) {
+            return { status: 'invalid', message: 'Unrecognized save format' };
+        }
+        if (Date.now() - save.savedAt > SAVE_MAX_AGE) {
+            return { status: 'invalid', message: 'Saved game is more than 7 days old' };
+        }
+        const check = JSON.parse(gameAPI.check_save(JSON.stringify(save.engine)));
+        if (!check.valid) {
+            return { status: 'invalid', message: check.message };
+        }
+        return { status: 'ok', save };
+    } catch (e) {
+        return { status: 'invalid', message: e.message };
     }
 }
 
@@ -347,7 +327,7 @@ function loadGameState() {
  */
 function clearGameState() {
     try {
-        localStorage.removeItem('wave_game_state');
+        localStorage.removeItem(SAVE_KEY);
     } catch (e) {
         console.warn('Could not clear game state from localStorage');
     }
@@ -662,6 +642,8 @@ function showChallengeResult(won, data) {
     playSound(won ? 'success' : 'fail');
     // Refresh the stats panel while the loop is still marked running
     updateStats(0);
+    // A finished run cannot be continued
+    clearGameState();
     stopGameLoop();
     // Draw the final state so the HUD matches the result
     render();
@@ -2787,9 +2769,9 @@ function setupInputHandlers() {
 }
 
 /**
- * Start the game
+ * Show the in-game UI and hide the setup screen
  */
-function startGame() {
+function showGameScreen() {
     document.getElementById('tutorial').classList.add('hidden');
     document.getElementById('game-title').classList.remove('hidden');
     document.getElementById('hud').classList.remove('hidden');
@@ -2798,11 +2780,28 @@ function startGame() {
     document.getElementById('pause-btn').classList.remove('hidden');
     document.getElementById('stats-panel').classList.remove('hidden');
 
+    soundEnabled = document.getElementById('sound-toggle').checked;
     if (soundEnabled) {
         initAudioContext();
         resumeAudioContext();
     }
-    
+
+    document.getElementById('challenge-item').classList.toggle('hidden', gameMode !== 'challenge');
+    weatherParticles = [];
+    resetFieldGradients();
+    sectorColorCache.clear();
+    resetEventIndicators();
+    selectedSector = -1;
+    blockedSectorFlash = null;
+}
+
+/**
+ * Start a new game with the settings chosen on the setup screen. This
+ * deliberately discards any saved run.
+ */
+function startGame() {
+    clearGameState();
+
     // Reset game stats
     gameStartTime = Date.now();
     totalGameTime = 0;
@@ -2811,11 +2810,9 @@ function startGame() {
     currentStreak = 0;
     
     // Get settings
-    soundEnabled = document.getElementById('sound-toggle').checked;
     difficulty = document.getElementById('difficulty-select').value;
     const modeSelectElem = document.getElementById('mode-select');
     gameMode = modeSelectElem ? modeSelectElem.value : 'practice';
-    document.getElementById('challenge-item').classList.toggle('hidden', gameMode !== 'challenge');
     const fieldTypeSelectElem = document.getElementById('field-type-select');
     const stadiumTypeSelectElem = document.getElementById('stadium-type-select');
     const weatherSelectElem = document.getElementById('weather-select');
@@ -2824,15 +2821,108 @@ function startGame() {
     stadiumType = stadiumTypeSelectElem ? stadiumTypeSelectElem.value : 'classic';
     weatherType = weatherSelectElem ? weatherSelectElem.value : 'sunny';
     timeOfDay = timeSelectElem ? timeSelectElem.value : 'day';
-    weatherParticles = [];
-    resetFieldGradients();
-    sectorColorCache.clear();
-    resetEventIndicators();
-    selectedSector = -1;
-    blockedSectorFlash = null;
 
+    showGameScreen();
     initGame();
     startGameLoop();
+}
+
+/**
+ * Resume the saved run. The engine is restored before the game loop
+ * starts, so no update runs against a fresh simulation.
+ */
+function continueGame() {
+    const saved = readSavedGame();
+    if (saved.status !== 'ok') {
+        handleUnrestorableSave(saved.message || 'No saved game found');
+        return;
+    }
+
+    const { save } = saved;
+    const result = JSON.parse(gameAPI.load_game(JSON.stringify(save.engine)));
+    if (result.status !== 'loaded') {
+        handleUnrestorableSave(result.message);
+        return;
+    }
+
+    // Settings come from the restored simulation so they always match it
+    gameState = JSON.parse(gameAPI.get_game_state());
+    fieldType = gameState.venue;
+    weatherType = gameState.weather;
+    difficulty = gameState.difficulty;
+    gameMode = gameState.mode;
+    stadiumType = STADIUM_THEMES[save.ui?.stadiumType] ? save.ui.stadiumType : 'classic';
+    timeOfDay = ['day', 'dusk', 'night'].includes(save.ui?.timeOfDay) ? save.ui.timeOfDay : 'day';
+    syncSetupControls();
+
+    const stats = save.stats || {};
+    waveAttempts = Number(stats.waveAttempts) || 0;
+    successfulWaves = Number(stats.successfulWaves) || 0;
+    currentStreak = Number(stats.currentStreak) || 0;
+    totalGameTime = Number(stats.totalGameTime) || 0;
+    gameStartTime = Date.now();
+
+    showGameScreen();
+    startGameLoop();
+    showNotification('Welcome back! Your game has been restored.', 'success');
+}
+
+/**
+ * Make the setup screen show the settings of the run being played
+ */
+function syncSetupControls() {
+    const values = {
+        'difficulty-select': difficulty,
+        'mode-select': gameMode,
+        'field-type-select': fieldType,
+        'stadium-type-select': stadiumType,
+        'weather-select': weatherType,
+        'time-select': timeOfDay
+    };
+    for (const [id, value] of Object.entries(values)) {
+        const element = document.getElementById(id);
+        if (element) element.value = value;
+    }
+}
+
+/**
+ * A save that cannot be restored is cleared, and the player is told why
+ * and offered a fresh start instead of silently losing it
+ */
+function handleUnrestorableSave(message) {
+    console.warn('Saved game could not be restored:', message);
+    clearGameState();
+    refreshContinueOption();
+    const notice = document.getElementById('save-notice');
+    notice.textContent = "Your saved game couldn't be restored and was cleared. Start a new game to play.";
+    notice.classList.remove('hidden');
+}
+
+/**
+ * Offer Continue on the setup screen when a restorable save exists
+ */
+function refreshContinueOption() {
+    const continueBtn = document.getElementById('continue-btn');
+    const startBtn = document.getElementById('start-btn');
+    const notice = document.getElementById('save-notice');
+    const saved = readSavedGame();
+
+    if (saved.status === 'ok') {
+        const engine = saved.save.engine;
+        const mode = engine.mode === 'challenge' ? 'Challenge' : 'Practice';
+        const time = formatTime(saved.save.stats?.totalGameTime || 0);
+        continueBtn.textContent = `▶ Continue ${mode} · score ${engine.score}`;
+        continueBtn.title = `${mode} run, ${time} played`;
+        continueBtn.classList.remove('hidden');
+        startBtn.textContent = 'New Game';
+        notice.classList.add('hidden');
+    } else {
+        continueBtn.classList.add('hidden');
+        startBtn.textContent = "Let's Go!";
+        if (saved.status === 'invalid') {
+            handleUnrestorableSave(saved.message);
+        }
+    }
 }
 
 /**
@@ -2841,6 +2931,7 @@ function startGame() {
 function restartGame() {
     // Stop the current game loop
     stopGameLoop();
+    clearGameState();
     
     // Reset game stats
     gameStartTime = Date.now();
@@ -2872,6 +2963,7 @@ function restartGame() {
  * Return to the setup screen so players can change options
  */
 function returnToSetup() {
+    saveGameState();
     stopGameLoop();
     isPaused = false;
     gameState = null;
@@ -2895,6 +2987,7 @@ function returnToSetup() {
     document.getElementById('stats-panel').classList.add('hidden');
     document.getElementById('game-title').classList.add('hidden');
     document.getElementById('tutorial').classList.remove('hidden');
+    refreshContinueOption();
 
     // Reset surface stats for the next run
     setHudText('game-time', '0:00');
@@ -2949,6 +3042,12 @@ async function main() {
 
     // Setup start button
     addTrackedEventListener(document.getElementById('start-btn'), 'click', startGame);
+    addTrackedEventListener(document.getElementById('continue-btn'), 'click', continueGame);
+    // Save when the page is closed or reloaded mid-game
+    addTrackedEventListener(window, 'pagehide', () => {
+        if (isGameRunning) saveGameState();
+    });
+    refreshContinueOption();
 
     exposeDiagnostics();
 
