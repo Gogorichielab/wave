@@ -18,6 +18,12 @@ export const WEATHER_MODIFIERS = {
     snowy:  { energy_rate: 0.50, fatigue_rate: 1.30 },
 };
 
+// Seconds a sector anticipates before standing once the wave reaches it
+const STAND_DELAY = 0.2;
+// Accelerating waves shorten each sector interval by this much, down to the minimum
+const ACCELERATING_SPEED_STEP = -0.025;
+const MIN_WAVE_INTERVAL = 0.1;
+
 export class SectorState {
     static IDLE = "idle";
     static ANTICIPATING = "anticipating";
@@ -201,7 +207,7 @@ export class WaveGame {
             this.wave_direction = 1;
         } else if (this.wave_pattern === 'accelerating') {
             this.wave_direction = 1;
-            this.speed_increment = -0.025;  // Get faster over time
+            this.speed_increment = ACCELERATING_SPEED_STEP;  // Get faster over time
         } else {  // normal
             this.wave_direction = 1;
         }
@@ -211,7 +217,8 @@ export class WaveGame {
     }
 
     start_wave(sector_id, pattern = null) {
-        if (this.wave_active) {
+        // A double wave's second front can still be running after the first finishes
+        if (this.wave_active || this.second_wave_active) {
             return false;
         }
 
@@ -234,7 +241,7 @@ export class WaveGame {
                     this.wave_direction = 1;
                 } else if (this.wave_pattern === 'accelerating') {
                     this.wave_direction = 1;
-                    this.speed_increment = -0.015;
+                    this.speed_increment = ACCELERATING_SPEED_STEP;
                 } else {  // normal
                     this.wave_direction = 1;
                 }
@@ -295,80 +302,74 @@ export class WaveGame {
     }
 
     _updateWave(dt, isSecondWave = false) {
-        // Get appropriate wave state
-        let waveTimer = isSecondWave ? this.second_wave_timer : this.wave_timer;
-        let currentSector = isSecondWave ? this.second_current_wave_sector : this.current_wave_sector;
-        let startSector = isSecondWave ? this.second_wave_start_sector : this.wave_start_sector;
+        const timerKey = isSecondWave ? 'second_wave_timer' : 'wave_timer';
+        const activeKey = isSecondWave ? 'second_wave_active' : 'wave_active';
 
-        waveTimer += dt;
+        this[timerKey] += dt;
 
-        // Check if anticipating sector should stand
-        const current = this.sectors[currentSector];
-        if (current.state === SectorState.ANTICIPATING) {
-            if (waveTimer > 0.2) {
-                if (current.stand_up()) {
-                    this.combo += 1;
-                    this.score += 10 * this.combo;
-                }
+        while (this[activeKey]) {
+            this._standIfDue(isSecondWave);
+            if (this[timerKey] < this.wave_speed) {
+                break;
+            }
+            // Carry the remainder into the next sector's interval so pacing
+            // does not depend on the update rate
+            this[timerKey] -= this.wave_speed;
+            this._advanceFront(isSecondWave);
+        }
+    }
+
+    _standIfDue(isSecondWave) {
+        const timer = isSecondWave ? this.second_wave_timer : this.wave_timer;
+        const sectorId = isSecondWave ? this.second_current_wave_sector : this.current_wave_sector;
+        const current = this.sectors[sectorId];
+        if (current.state === SectorState.ANTICIPATING && timer > STAND_DELAY) {
+            if (current.stand_up()) {
+                this.combo += 1;
+                this.score += 10 * this.combo;
             }
         }
+    }
 
-        // Propagate wave to next sector
-        if (waveTimer >= this.wave_speed) {
-            // For accelerating pattern, increase speed
-            if (this.wave_pattern === 'accelerating' && !isSecondWave) {
-                this.wave_speed = Math.max(0.1, this.wave_speed + this.speed_increment);
-                this.sectors_traveled += 1;
-            }
+    _advanceFront(isSecondWave) {
+        const currentSector = isSecondWave ? this.second_current_wave_sector : this.current_wave_sector;
+        const startSector = isSecondWave ? this.second_wave_start_sector : this.wave_start_sector;
 
-            // Calculate next sector based on direction
-            let next_sector_id = (currentSector + this.wave_direction + this.num_sectors) % this.num_sectors;
-            const next_sector = this.sectors[next_sector_id];
+        // For accelerating pattern, shorten the interval for the next sector
+        if (this.wave_pattern === 'accelerating' && !isSecondWave) {
+            this.wave_speed = Math.max(MIN_WAVE_INTERVAL, this.wave_speed + this.speed_increment);
+            this.sectors_traveled += 1;
+        }
 
-            // Check if wave completed full circle
-            if (next_sector_id === startSector) {
-                if (isSecondWave) {
-                    this.second_wave_active = false;
-                    // Check if both waves completed
-                    if (!this.wave_active) {
-                        this.complete_wave();
-                    }
+        const next_sector_id = (currentSector + this.wave_direction + this.num_sectors) % this.num_sectors;
 
-                } else {
-                    // For double wave, wait for second wave to complete
-                    this.wave_active = false;
-                    if (!this.second_wave_active || this.wave_pattern !== 'double') {
-                        this.complete_wave();
-                    }
+        // Check if wave completed full circle
+        if (next_sector_id === startSector) {
+            if (isSecondWave) {
+                this.second_wave_active = false;
+                // Check if both waves completed
+                if (!this.wave_active) {
+                    this.complete_wave();
                 }
             } else {
-                // Propagate to next sector
-                if (next_sector.start_wave()) {
-                    if (isSecondWave) {
-                        this.second_current_wave_sector = next_sector_id;
-                        this.second_wave_timer = 0.0;
-                    } else {
-                        this.current_wave_sector = next_sector_id;
-                        this.wave_timer = 0.0;
-                    }
-                } else {
-                    // Wave failed
-                    if (isSecondWave) {
-                        this.second_wave_active = false;
-                    } else {
-                        this.wave_active = false;
-                        this.second_wave_active = false;  // Both waves fail
-                    }
-                    this.fail_wave();
+                // For double wave, wait for second wave to complete
+                this.wave_active = false;
+                if (!this.second_wave_active || this.wave_pattern !== 'double') {
+                    this.complete_wave();
                 }
             }
+            return;
         }
 
-        // Update timer
-        if (isSecondWave) {
-            this.second_wave_timer = waveTimer;
+        if (this.sectors[next_sector_id].start_wave()) {
+            if (isSecondWave) {
+                this.second_current_wave_sector = next_sector_id;
+            } else {
+                this.current_wave_sector = next_sector_id;
+            }
         } else {
-            this.wave_timer = waveTimer;
+            // Wave failed; a failure on either front ends both
+            this.fail_wave();
         }
     }
 
