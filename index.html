@@ -179,6 +179,16 @@
             opacity: 0.5;
         }
 
+        #controls .resource-status {
+            pointer-events: none;
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 10px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
         #tutorial {
             position: absolute;
             top: 50%;
@@ -607,6 +617,11 @@
                 font-size: 0.75em;
             }
 
+            #controls .resource-status {
+                padding: 8px 10px;
+                font-size: 0.75em;
+            }
+
             #notification {
                 top: 40px;
                 font-size: 0.9em;
@@ -694,7 +709,7 @@
             <h2>🌊 Stadium Wave Game</h2>
             <p>Click or tap any crowd sector to start the wave!</p>
             <p>Keep the energy high and the combo going.</p>
-            <p>⚡ <strong>Right-click or long press</strong> sectors to boost their energy.</p>
+            <p>⚡ <strong>Right-click or long press</strong> sectors to boost their energy. Boosts are limited and recharge over time.</p>
             <p>⌨️ <strong>Spacebar</strong> starts wave at sector 0.</p>
             <div class="settings-panel">
                 <label>
@@ -757,6 +772,8 @@
                 <li>🖱️ <strong>Right-click</strong> sector to boost energy</li>
                 <li>📱 <strong>Tap</strong> sector to start wave (mobile)</li>
                 <li>📱 <strong>Long press</strong> sector to boost (mobile)</li>
+                <li>⚡ Boosts use a charge; charges recharge over time</li>
+                <li>📣 Scoreboard Hype boosts everyone, then needs to cool down</li>
                 <li>⌨️ <strong>Space</strong> to start wave at sector 0</li>
                 <li>⌨️ <strong>P</strong> to pause/resume</li>
                 <li>⌨️ <strong>F</strong> for fullscreen</li>
@@ -789,6 +806,7 @@
 
         <div id="controls" class="hidden">
             <button id="mascot-btn">🐾 Mascot Moment</button>
+            <span id="boost-status" class="resource-status" aria-live="polite">⚡ Boosts</span>
             <button id="scoreboard-btn">📣 Scoreboard Hype</button>
             <button id="setup-btn">🔄 Back to Setup</button>
         </div>
