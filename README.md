@@ -120,6 +120,22 @@ npm run test:e2e:prod
 5. **Score Points**: Complete full stadium waves for bonus points
 6. **Save Progress**: Use the save button to preserve your high scores
 
+### Difficulty
+
+Difficulty is applied by the engine (`DIFFICULTY_PRESETS` in `engine.js`):
+
+| Setting | Easy | Medium | Hard |
+|---|---|---|---|
+| Seconds per sector | 1.2 | 1.0 | 0.8 |
+| Crowd energy recovery | ×1.25 | ×1.0 | ×0.8 |
+| Mascot distraction every | 45s | 30s | 18s |
+| Distraction per mascot visit | 0.2 | 0.3 | 0.4 |
+| Boost charges | 5 | 3 | 2 |
+| Seconds to recharge one boost | 6 | 8 | 12 |
+| Scoreboard Hype cooldown | 30s | 45s | 60s |
+
+Boost charges and the Scoreboard Hype cooldown are shown in the control bar.
+
 ### Scoring
 
 - Basic wave participation: 10 points × combo multiplier

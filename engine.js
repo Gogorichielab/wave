@@ -18,6 +18,42 @@ export const WEATHER_MODIFIERS = {
     snowy:  { energy_rate: 0.50, fatigue_rate: 1.30 },
 };
 
+// Difficulty tuning. Easier settings give slower waves, faster energy
+// recovery, rarer and weaker mascot distractions, and more boosts.
+export const DIFFICULTY_PRESETS = {
+    easy: {
+        wave_interval: 1.2,         // seconds per sector
+        energy_rate: 1.25,          // multiplier on crowd energy recovery
+        mascot_interval: 45,        // seconds between ambient mascot distractions
+        distraction_strength: 0.2,  // distraction added per mascot visit
+        boost_charges: 5,
+        boost_recharge: 6,          // seconds to regain one boost charge
+        hype_cooldown: 30,          // seconds between Scoreboard Hype uses
+    },
+    medium: {
+        wave_interval: 1.0,
+        energy_rate: 1.0,
+        mascot_interval: 30,
+        distraction_strength: 0.3,
+        boost_charges: 3,
+        boost_recharge: 8,
+        hype_cooldown: 45,
+    },
+    hard: {
+        wave_interval: 0.8,
+        energy_rate: 0.8,
+        mascot_interval: 18,
+        distraction_strength: 0.4,
+        boost_charges: 2,
+        boost_recharge: 12,
+        hype_cooldown: 60,
+    },
+};
+
+// Ambient scoreboard hype plays on the same schedule on every difficulty
+const AMBIENT_SCOREBOARD_INTERVAL = 45;
+const SCOREBOARD_BOOST = 0.2;
+
 // Seconds a sector anticipates before standing once the wave reaches it
 const STAND_DELAY = 0.2;
 // Accelerating waves shorten each sector interval by this much, down to the minimum
@@ -123,7 +159,9 @@ export class CrowdSector {
 }
 
 export class WaveGame {
-    constructor(num_sectors = 16, venue = 'soccer', weather = 'sunny') {
+    constructor(num_sectors = 16, venue = 'soccer', weather = 'sunny', difficulty = 'medium', rng = Math.random) {
+        // Injectable random source so tests can run deterministic scenarios
+        this.rng = rng;
         this.num_sectors = num_sectors;
         this.sectors = [];
         for (let i = 0; i < num_sectors; i++) {
@@ -138,7 +176,6 @@ export class WaveGame {
         this.time_elapsed = 0.0;
         this.successful_waves = 0;
         this.failed_waves = 0;
-        this.wave_speed = 1.0;
         this.wave_timer = 0.0;
         this.events = [];
         this.stadium_level = 1;
@@ -147,7 +184,6 @@ export class WaveGame {
         // Special wave pattern support
         this.wave_pattern = 'normal';  // normal, reverse, double, accelerating
         this.wave_direction = 1;  // 1 for clockwise, -1 for counter-clockwise
-        this.base_wave_speed = 1.0;
         this.speed_increment = 0.0;  // for accelerating pattern
         this.sectors_traveled = 0;
 
@@ -157,16 +193,30 @@ export class WaveGame {
         this.second_current_wave_sector = -1;
         this.second_wave_timer = 0.0;
 
-        // Venue and weather
+        // Venue, weather, and difficulty
         this.venue = venue;
         this.weather = weather;
+        this.difficulty = DIFFICULTY_PRESETS[difficulty] ? difficulty : 'medium';
+        this.tuning = DIFFICULTY_PRESETS[this.difficulty];
+        this.base_wave_speed = this.tuning.wave_interval;
+        this.wave_speed = this.base_wave_speed;
         this._applyModifiers();
+
+        // Player resources
+        this.max_boost_charges = this.tuning.boost_charges;
+        this.boost_charges = this.max_boost_charges;
+        this.boost_recharge_timer = 0.0;
+        this.hype_cooldown_remaining = 0.0;
+
+        // Ambient stadium events
+        this.mascot_timer = 0.0;
+        this.scoreboard_timer = 0.0;
     }
 
     _applyModifiers() {
         const vm = VENUE_MODIFIERS[this.venue] || VENUE_MODIFIERS.soccer;
         const wm = WEATHER_MODIFIERS[this.weather] || WEATHER_MODIFIERS.sunny;
-        const energyRate = vm.energy_rate * wm.energy_rate;
+        const energyRate = vm.energy_rate * wm.energy_rate * this.tuning.energy_rate;
         const fatigueRate = vm.fatigue_rate * wm.fatigue_rate;
         const threshold = vm.readiness_threshold;
         for (const sector of this.sectors) {
@@ -290,6 +340,9 @@ export class WaveGame {
             sector.update(dt);
         }
 
+        this._updateResources(dt);
+        this._updateAmbientEvents(dt);
+
         // Handle wave propagation for first wave
         if (this.wave_active) {
             this._updateWave(dt, false);
@@ -298,6 +351,35 @@ export class WaveGame {
         // Handle second wave for double pattern
         if (this.second_wave_active) {
             this._updateWave(dt, true);
+        }
+    }
+
+    _updateResources(dt) {
+        if (this.boost_charges < this.max_boost_charges) {
+            this.boost_recharge_timer += dt;
+            while (this.boost_recharge_timer >= this.tuning.boost_recharge &&
+                   this.boost_charges < this.max_boost_charges) {
+                this.boost_recharge_timer -= this.tuning.boost_recharge;
+                this.boost_charges += 1;
+            }
+        }
+        if (this.boost_charges >= this.max_boost_charges) {
+            this.boost_recharge_timer = 0.0;
+        }
+        this.hype_cooldown_remaining = Math.max(0, this.hype_cooldown_remaining - dt);
+    }
+
+    _updateAmbientEvents(dt) {
+        this.mascot_timer += dt;
+        if (this.mascot_timer >= this.tuning.mascot_interval) {
+            this.mascot_timer -= this.tuning.mascot_interval;
+            this.trigger_event('mascot', Math.floor(this.rng() * this.num_sectors));
+        }
+
+        this.scoreboard_timer += dt;
+        if (this.scoreboard_timer >= AMBIENT_SCOREBOARD_INTERVAL) {
+            this.scoreboard_timer -= AMBIENT_SCOREBOARD_INTERVAL;
+            this.trigger_event('scoreboard');
         }
     }
 
@@ -409,10 +491,33 @@ export class WaveGame {
         });
     }
 
+    /**
+     * Spend one boost charge on a sector.
+     * @returns {{boosted: boolean, reason?: string}}
+     */
     boost_sector(sector_id) {
-        if (sector_id >= 0 && sector_id < this.num_sectors) {
-            this.sectors[sector_id].boost_energy();
+        if (!Number.isInteger(sector_id) || sector_id < 0 || sector_id >= this.num_sectors) {
+            return { boosted: false, reason: 'invalid_sector' };
         }
+        if (this.boost_charges < 1) {
+            return { boosted: false, reason: 'no_charges' };
+        }
+        this.boost_charges -= 1;
+        this.sectors[sector_id].boost_energy();
+        return { boosted: true };
+    }
+
+    /**
+     * Player-triggered Scoreboard Hype, limited by a cooldown.
+     * @returns {{used: boolean, reason?: string}}
+     */
+    use_scoreboard_hype() {
+        if (this.hype_cooldown_remaining > 0) {
+            return { used: false, reason: 'cooldown' };
+        }
+        this.hype_cooldown_remaining = this.tuning.hype_cooldown;
+        this.trigger_event('scoreboard');
+        return { used: true };
     }
 
     trigger_event(event_type, sector_id = null) {
@@ -420,7 +525,7 @@ export class WaveGame {
             if (sector_id !== null && sector_id !== undefined) {
                 for (let i = -1; i <= 1; i++) {
                     const idx = (sector_id + i + this.num_sectors) % this.num_sectors;
-                    this.sectors[idx].distractions = Math.min(1.0, this.sectors[idx].distractions + 0.3);
+                    this.sectors[idx].distractions = Math.min(1.0, this.sectors[idx].distractions + this.tuning.distraction_strength);
                 }
             }
 
@@ -434,9 +539,9 @@ export class WaveGame {
                 effect: 'distraction'
             });
         } else if (event_type === 'scoreboard') {
-            this.sectors.forEach(sector => sector.boost_energy(0.2));
+            this.sectors.forEach(sector => sector.boost_energy(SCOREBOARD_BOOST));
             this.schedule_event('scoreboard', {
-                boost: 0.2,
+                boost: SCOREBOARD_BOOST,
                 effect: 'energy'
             });
         }
@@ -474,6 +579,15 @@ export class WaveGame {
             second_current_wave_sector: this.second_current_wave_sector,
             venue: this.venue,
             weather: this.weather,
+            difficulty: this.difficulty,
+            boost_charges: this.boost_charges,
+            max_boost_charges: this.max_boost_charges,
+            boost_recharge_time: this.tuning.boost_recharge,
+            boost_recharge_remaining: this.boost_charges < this.max_boost_charges
+                ? this.tuning.boost_recharge - this.boost_recharge_timer
+                : 0,
+            hype_cooldown: this.tuning.hype_cooldown,
+            hype_cooldown_remaining: this.hype_cooldown_remaining,
         };
     }
 
@@ -497,8 +611,8 @@ export class WaveGame {
 export const gameAPI = {
     game: null,
 
-    init_game(num_sectors = 16, venue = 'soccer', weather = 'sunny') {
-        this.game = new WaveGame(num_sectors, venue, weather);
+    init_game(num_sectors = 16, venue = 'soccer', weather = 'sunny', difficulty = 'medium') {
+        this.game = new WaveGame(num_sectors, venue, weather, difficulty);
         return JSON.stringify({ status: 'initialized', sectors: num_sectors });
     },
     
@@ -520,8 +634,18 @@ export const gameAPI = {
     },
     
     boost_sector_energy(sector_id) {
-        this.game.boost_sector(sector_id);
-        return JSON.stringify({ boosted: sector_id });
+        const result = this.game.boost_sector(sector_id);
+        return JSON.stringify({
+            ...result,
+            sector: sector_id,
+            charges: this.game.boost_charges,
+            recharge_remaining: this.game.get_state().boost_recharge_remaining
+        });
+    },
+
+    use_scoreboard_hype() {
+        const result = this.game.use_scoreboard_hype();
+        return JSON.stringify({ ...result, cooldown_remaining: this.game.hype_cooldown_remaining });
     },
     
     get_game_state() {

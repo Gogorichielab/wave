@@ -30,7 +30,6 @@ let stadiumType = 'classic';
 let weatherType = 'sunny';
 let timeOfDay = 'day';
 let weatherParticles = [];
-let eventIntervals = [];
 let activeEventIndicators = [];
 let lastAutoSaveTime = 0;
 const AUTO_SAVE_INTERVAL = 30000; // Auto-save every 30 seconds
@@ -544,7 +543,7 @@ function shouldRenderDetailedAnimations() {
  */
 function initGame() {
     try {
-        const result = gameAPI.init_game(16, fieldType, weatherType);
+        const result = gameAPI.init_game(16, fieldType, weatherType, difficulty);
         console.log('Game initialized:', result);
         return true;
     } catch (error) {
@@ -853,9 +852,16 @@ function startWave(sectorId) {
  */
 function boostSector(sectorId) {
     try {
-        gameAPI.boost_sector_energy(sectorId);
+        const result = JSON.parse(gameAPI.boost_sector_energy(sectorId));
+        if (result.boosted) {
+            showNotification(`Sector ${sectorId} boosted! (${result.charges} left)`, 'success');
+        } else if (result.reason === 'no_charges') {
+            showNotification(`No boosts left. Next charge in ${Math.ceil(result.recharge_remaining)}s`, 'failure');
+        }
+        return result.boosted;
     } catch (error) {
         console.error('Failed to boost sector:', error);
+        return false;
     }
 }
 
@@ -871,30 +877,17 @@ function triggerStadiumEvent(eventType, sectorId = null) {
 }
 
 /**
- * Start and manage ambient event timers
+ * Use the player's Scoreboard Hype, which is limited by a cooldown
  */
-function clearEventTimers() {
-    eventIntervals.forEach(interval => clearInterval(interval));
-    eventIntervals = [];
-}
-
-function startEventTimers() {
-    clearEventTimers();
-
-    // Periodic scoreboard hype
-    const scoreboardInterval = setInterval(() => {
-        if (!isGameRunning || isPaused || !gameState) return;
-        triggerStadiumEvent('scoreboard');
-    }, 45000);
-
-    // Occasional mascot distraction aimed at random sector
-    const mascotInterval = setInterval(() => {
-        if (!isGameRunning || isPaused || !gameState) return;
-        const target = Math.floor(Math.random() * gameState.sectors.length);
-        triggerStadiumEvent('mascot', target);
-    }, 30000);
-
-    eventIntervals.push(scoreboardInterval, mascotInterval);
+function useScoreboardHype() {
+    try {
+        const result = JSON.parse(gameAPI.use_scoreboard_hype());
+        if (!result.used) {
+            showNotification(`Scoreboard Hype recharging: ${Math.ceil(result.cooldown_remaining)}s`, 'failure');
+        }
+    } catch (error) {
+        console.error('Failed to use scoreboard hype:', error);
+    }
 }
 
 function resetEventIndicators() {
@@ -2159,6 +2152,28 @@ function updateHUD() {
     setHudText('combo', gameState.combo + 'x');
     setHudText('waves', String(gameState.successful_waves));
     setHudText('max-combo', gameState.max_combo + 'x');
+    updateResourceControls();
+}
+
+/**
+ * Show boost charges and the Scoreboard Hype cooldown before the player acts
+ */
+function updateResourceControls() {
+    const charges = gameState.boost_charges;
+    const recharge = charges < gameState.max_boost_charges
+        ? ` (+1 in ${Math.ceil(gameState.boost_recharge_remaining)}s)`
+        : '';
+    setHudText('boost-status', `⚡ Boosts ${charges}/${gameState.max_boost_charges}${recharge}`);
+
+    const hypeRemaining = Math.ceil(gameState.hype_cooldown_remaining);
+    setHudText('scoreboard-btn', hypeRemaining > 0
+        ? `📣 Hype in ${hypeRemaining}s`
+        : '📣 Scoreboard Hype');
+
+    const hypeReady = hypeRemaining <= 0;
+    if (hudElements['scoreboard-btn'] && hudElements['scoreboard-btn'].disabled === hypeReady) {
+        hudElements['scoreboard-btn'].disabled = !hypeReady;
+    }
 }
 
 /**
@@ -2255,7 +2270,6 @@ function stopGameLoop() {
         cancelAnimationFrame(animationId);
         animationId = null;
     }
-    clearEventTimers();
 
     // Clean up audio nodes to prevent memory leaks
     if (audioContext && audioContext.state !== 'closed') {
@@ -2354,7 +2368,6 @@ function setupInputHandlers() {
         const sectorId = getSectorAtPosition(x, y);
         if (sectorId >= 0) {
             boostSector(sectorId);
-            showNotification(`Sector ${sectorId} boosted!`, 'success');
         }
     });
     
@@ -2401,7 +2414,6 @@ function setupInputHandlers() {
             // Short tap = start wave
             if (touchDuration > 500) {
                 boostSector(touchStartSector);
-                showNotification(`Sector ${touchStartSector} boosted!`, 'success');
             } else {
                 startWave(touchStartSector);
             }
@@ -2462,7 +2474,7 @@ function setupInputHandlers() {
     if (scoreboardBtn) {
         addTrackedEventListener(scoreboardBtn, 'click', () => {
             if (!gameState) return;
-            triggerStadiumEvent('scoreboard');
+            useScoreboardHype();
         });
     }
     
@@ -2592,7 +2604,6 @@ function startGame() {
     resetEventIndicators();
 
     initGame();
-    startEventTimers();
     startGameLoop();
 }
 
@@ -2623,7 +2634,6 @@ function restartGame() {
     resetFieldGradients();
     resetEventIndicators();
     initGame();
-    startEventTimers();
     startGameLoop();
 }
 
@@ -2660,6 +2670,9 @@ function returnToSetup() {
     setHudText('combo', '0x');
     setHudText('waves', '0');
     setHudText('max-combo', '0x');
+    setHudText('scoreboard-btn', '📣 Scoreboard Hype');
+    const scoreboardBtn = document.getElementById('scoreboard-btn');
+    if (scoreboardBtn) scoreboardBtn.disabled = false;
 }
 
 /**
